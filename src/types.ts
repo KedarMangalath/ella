@@ -37,11 +37,19 @@ export interface ProviderSettings {
   defaultModel?: string;
 }
 
+export interface AccessibilitySettings {
+  noColor: boolean;
+  reducedMotion: boolean;
+  highContrast: boolean;
+  screenReader: boolean;
+}
+
 export interface EllaConfig {
   defaultProvider: ProviderName;
   defaultModel: string;
   thinkingMode: ThinkingMode;
   approvalMode: ApprovalMode;
+  accessibility: AccessibilitySettings;
   providers: Record<ProviderName, ProviderSettings>;
 }
 

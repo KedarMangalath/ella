@@ -2,8 +2,6 @@ import { stdout } from "node:process";
 
 type Rgb = readonly [number, number, number];
 
-const useColor = !process.env.NO_COLOR && (Boolean(process.env.FORCE_COLOR) || stdout.isTTY);
-
 const palette = {
   plum: [92, 42, 105],
   mauve: [183, 132, 167],
@@ -17,6 +15,23 @@ const palette = {
   danger: [244, 131, 151],
 } satisfies Record<string, Rgb>;
 
+const highContrastPalette = {
+  ...palette,
+  mauve: [255, 179, 240],
+  orchid: [239, 166, 255],
+  lavender: [255, 235, 255],
+  rose: [255, 190, 220],
+  muted: [230, 214, 236],
+} satisfies Record<string, Rgb>;
+
+function activePalette(): typeof palette {
+  return process.env.ELLA_HIGH_CONTRAST ? highContrastPalette : palette;
+}
+
+function colorEnabled(): boolean {
+  return !process.env.NO_COLOR && (Boolean(process.env.FORCE_COLOR) || stdout.isTTY);
+}
+
 function esc(code: string): string {
   return `\x1b[${code}m`;
 }
@@ -26,12 +41,12 @@ function rgb([r, g, b]: Rgb): string {
 }
 
 function paint(color: Rgb, text: string): string {
-  if (!useColor) return text;
+  if (!colorEnabled()) return text;
   return `${rgb(color)}${text}${esc("0")}`;
 }
 
 function style(code: string, text: string): string {
-  if (!useColor) return text;
+  if (!colorEnabled()) return text;
   return `${esc(code)}${text}${esc("0")}`;
 }
 
@@ -41,22 +56,22 @@ function line(command: string, description: string): string {
 
 export const theme = {
   palette,
-  enabled: useColor,
+  enabled: colorEnabled,
   bold: (text: string) => style("1", text),
   dim: (text: string) => style("2", text),
-  header: (text: string) => theme.bold(paint(palette.orchid, text)),
-  brand: (text: string) => theme.bold(paint(palette.lavender, text)),
-  accent: (text: string) => paint(palette.mauve, text),
-  command: (text: string) => paint(palette.orchid, text),
-  prompt: (text: string) => paint(palette.rose, text),
-  label: (text: string) => paint(palette.lavender, text),
-  value: (text: string) => paint(palette.ink, text),
-  muted: (text: string) => paint(palette.muted, text),
-  success: (text: string) => paint(palette.success, text),
-  warning: (text: string) => paint(palette.warning, text),
-  danger: (text: string) => paint(palette.danger, text),
-  tool: (text: string) => theme.bold(paint(palette.mauve, text)),
-  code: (text: string) => paint(palette.lavender, text),
+  header: (text: string) => theme.bold(paint(activePalette().orchid, text)),
+  brand: (text: string) => theme.bold(paint(activePalette().lavender, text)),
+  accent: (text: string) => paint(activePalette().mauve, text),
+  command: (text: string) => paint(activePalette().orchid, text),
+  prompt: (text: string) => paint(activePalette().rose, text),
+  label: (text: string) => paint(activePalette().lavender, text),
+  value: (text: string) => paint(activePalette().ink, text),
+  muted: (text: string) => paint(activePalette().muted, text),
+  success: (text: string) => paint(activePalette().success, text),
+  warning: (text: string) => paint(activePalette().warning, text),
+  danger: (text: string) => paint(activePalette().danger, text),
+  tool: (text: string) => theme.bold(paint(activePalette().mauve, text)),
+  code: (text: string) => paint(activePalette().lavender, text),
 };
 
 export function slashCommandHelp(): string {
@@ -66,6 +81,7 @@ ${line("/exit, /quit", "Quit Ella")}
 ${line("/setup", "Run setup wizard")}
 ${line("/status", "Show active provider/model/settings")}
 ${line("/sessions", "List saved sessions")}
+${line("/continue [prompt]", "Continue latest session")}
 ${line("/resume [session-id]", "Resume saved session")}
 ${line("/new", "Start new session")}
 ${line("/config", "Show masked config")}
@@ -80,6 +96,11 @@ ${line("/key set [provider]", "Paste and save API key")}
 ${line("/key delete [provider]", "Delete stored API key")}
 ${line("/memory show|add|clear", "Project memory")}
 ${line("/todo list|add|done|clear", "Project todo list")}
+${line("/undo|/redo|/history", "Edit history")}
+${line("/graph build|stats|search|impact", "Repo graph")}
+${line("/agents", "List subagents")}
+${line("/swarm <task>", "Run swarm workflow")}
+${line("/accessibility", "Show accessibility settings")}
 ${line("/plan <task>", "Produce implementation plan")}
 ${line("/review [focus]", "Review repo/diff for issues")}
 ${line("/fix <problem>", "Debug and fix problem")}

@@ -10,6 +10,7 @@ coverage/
 
 .ella/
 .ella-test/
+.ella-test*/
 .tmp/
 
 .env

@@ -22,6 +22,10 @@ Available tools:
 - run_shell: {"command":"npm test","cwd":"."}
 - git_status: {}
 - git_diff: {"path":"optional/file"}
+- graph_build: {}
+- graph_stats: {}
+- graph_search: {"query":"symbol-or-path"}
+- graph_impact: {"target":"path-or-import"}
 
 Rules:
 - Prefer read/search before editing.

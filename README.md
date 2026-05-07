@@ -22,6 +22,10 @@ Ella is early MVP software. The current build has the product spine: CLI command
 - Agent shortcuts for planning, review, fixing, and explanation
 - Purple-mauve terminal palette with `NO_COLOR` support
 - Animated line-based Ella character during startup, thinking, and tool execution
+- Accessibility settings for color, motion, contrast, and screen-reader-friendly mode
+- Undo/redo for Ella file edits
+- Lightweight repository graph for symbol/import/path search and impact checks
+- Subagent profiles and swarm workflow prompts
 - Local coding tools for reading, searching, editing, shell commands, and git inspection
 - Permission modes with edit/shell previews for safer operation
 - Project initialization with `ELLA.md`
@@ -111,6 +115,7 @@ node dist/cli.js ask "review this repo"
 node dist/cli.js setup
 node dist/cli.js commands
 node dist/cli.js sessions
+node dist/cli.js continue [prompt]
 node dist/cli.js resume [session-id]
 node dist/cli.js memory show
 node dist/cli.js memory add "Use strict TypeScript."
@@ -121,6 +126,17 @@ node dist/cli.js plan "Add MCP support"
 node dist/cli.js review
 node dist/cli.js fix "Tests fail in provider parsing"
 node dist/cli.js explain "How tool permissions work"
+node dist/cli.js undo
+node dist/cli.js redo
+node dist/cli.js history
+node dist/cli.js graph build
+node dist/cli.js graph stats
+node dist/cli.js graph search "EllaAgent"
+node dist/cli.js graph impact "src/tools.ts"
+node dist/cli.js agents
+node dist/cli.js swarm "Add MCP support"
+node dist/cli.js accessibility show
+node dist/cli.js accessibility set reducedMotion on
 node dist/cli.js init
 node dist/cli.js models
 node dist/cli.js tools
@@ -188,6 +204,7 @@ Inside interactive mode:
 /setup
 /status
 /sessions
+/continue [prompt]
 /resume [session-id]
 /new
 /config
@@ -202,6 +219,13 @@ Inside interactive mode:
 /key delete [provider]
 /memory show|add|clear
 /todo list|add|done|clear
+/undo
+/redo
+/history
+/graph build|stats|search|impact
+/agents
+/swarm <task>
+/accessibility <setting> <on|off>
 /plan <task>
 /review [focus]
 /fix <problem>
@@ -215,6 +239,8 @@ Ella saves interactive sessions under `~/.ella/sessions`.
 
 ```bash
 node dist/cli.js sessions
+node dist/cli.js continue
+node dist/cli.js continue "Keep going from the last task"
 node dist/cli.js resume
 node dist/cli.js resume <session-id>
 ```
@@ -223,9 +249,29 @@ Inside interactive mode:
 
 ```text
 /sessions
+/continue
 /resume <session-id>
 /new
 ```
+
+## Accessibility
+
+Ella has persistent accessibility settings:
+
+```bash
+node dist/cli.js accessibility show
+node dist/cli.js accessibility set noColor on
+node dist/cli.js accessibility set reducedMotion on
+node dist/cli.js accessibility set highContrast on
+node dist/cli.js accessibility set screenReader on
+```
+
+Settings:
+
+- `noColor`: disables ANSI colors
+- `reducedMotion`: disables character animation
+- `highContrast`: uses brighter mauve/lavender colors
+- `screenReader`: disables animation and favors stable output
 
 ## Project Memory
 
@@ -257,6 +303,66 @@ node dist/cli.js todo add "Implement MCP support"
 node dist/cli.js todo done <todo-id>
 node dist/cli.js todo clear
 ```
+
+## Undo And Redo
+
+Ella records tool-driven file edits in `.ella/undo.json`.
+
+```bash
+node dist/cli.js history
+node dist/cli.js undo
+node dist/cli.js redo
+```
+
+Inside interactive mode:
+
+```text
+/history
+/undo
+/redo
+```
+
+## Repo Graph
+
+Ella includes a lightweight repository graph inspired by code-review-graph. It indexes paths, imports, symbols, and file sizes.
+
+```bash
+node dist/cli.js graph build
+node dist/cli.js graph stats
+node dist/cli.js graph search "symbol-or-path"
+node dist/cli.js graph impact "src/tools.ts"
+```
+
+The model can also use graph tools:
+
+- `graph_build`
+- `graph_stats`
+- `graph_search`
+- `graph_impact`
+
+## Subagents And Swarm
+
+Ella includes built-in subagent profiles:
+
+- `planner`
+- `explorer`
+- `coder`
+- `reviewer`
+- `tester`
+
+List them:
+
+```bash
+node dist/cli.js agents
+```
+
+Run a swarm workflow:
+
+```bash
+node dist/cli.js swarm "Implement streaming output"
+```
+
+The swarm command asks Ella to coordinate the profiles through plan, context, changes, validation, risks, and next steps.
 
 ## Local Tools
 

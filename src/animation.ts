@@ -35,7 +35,7 @@ export function ellaStill(label = "ready"): string {
 }
 
 function animationEnabled(): boolean {
-  return Boolean(stdout.isTTY && !process.env.ELLA_NO_ANIMATION);
+  return Boolean(stdout.isTTY && !process.env.ELLA_NO_ANIMATION && !process.env.ELLA_SCREEN_READER);
 }
 
 function clearFrame(): void {

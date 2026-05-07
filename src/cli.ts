@@ -4,6 +4,7 @@ import { stdin as input, stdout as output } from "node:process";
 import {
   apiKeyForProvider,
   approvalModeFromString,
+  applyAccessibilityEnvironment,
   configPath,
   envKeyForProvider,
   loadConfig,
@@ -37,6 +38,9 @@ import {
 } from "./session.js";
 import { kv, slashCommandHelp, theme } from "./theme.js";
 import { ellaStill } from "./animation.js";
+import { redoLast, undoLast, undoStatus } from "./undo.js";
+import { buildGraph, graphImpact, graphSearch, graphStats } from "./graph.js";
+import { formatSubagents, swarmPrompt } from "./subagents.js";
 
 const args = process.argv.slice(2);
 
@@ -49,9 +53,15 @@ ${theme.header("Usage")}
   ${theme.command("ella setup")}
   ${theme.command("ella commands")}
   ${theme.command("ella sessions")}
+  ${theme.command("ella continue [prompt]")}
   ${theme.command("ella resume [session-id]")}
   ${theme.command("ella memory <show|add|clear>")}
   ${theme.command("ella todo <list|add|done|clear>")}
+  ${theme.command("ella undo|redo|history")}
+  ${theme.command("ella graph <build|stats|search|impact>")}
+  ${theme.command("ella agents")}
+  ${theme.command("ella swarm <task>")}
+  ${theme.command("ella accessibility <show|set>")}
   ${theme.command("ella plan <task>")}
   ${theme.command("ella review [focus]")}
   ${theme.command("ella fix <problem>")}
@@ -80,6 +90,13 @@ async function promptLine(question: string): Promise<string> {
   } finally {
     rl.close();
   }
+}
+
+function boolFromString(value: string): boolean | null {
+  const normalized = value.trim().toLowerCase();
+  if (["true", "on", "yes", "1"].includes(normalized)) return true;
+  if (["false", "off", "no", "0"].includes(normalized)) return false;
+  return null;
 }
 
 function requireProvider(value: string): ProviderName {
@@ -196,6 +213,7 @@ async function runAsk(config: EllaConfig, prompt: string): Promise<void> {
 }
 
 async function interactive(config: EllaConfig, resumeSessionId?: string): Promise<void> {
+  applyAccessibilityEnvironment(config);
   if (!apiKeyForProvider(config, config.defaultProvider)) {
     await setupWizard(config);
   }
@@ -239,6 +257,21 @@ ${kv("Config", configPath())}
     }
     if (trimmed === "/sessions") {
       output.write(`${formatSessionList(await listSessions())}\n`);
+      continue;
+    }
+    if (trimmed === "/continue" || trimmed.startsWith("/continue ")) {
+      const extra = trimmed.slice("/continue".length).trim();
+      const target = (await latestSession())?.id;
+      if (!target) {
+        output.write(`${theme.warning("No session to continue.")}\n`);
+        continue;
+      }
+      session = await loadSession(target);
+      if (extra) {
+        await runAsk(config, `Continue session ${session.id}. User continuation: ${extra}`);
+      } else {
+        output.write(`${theme.success("Continuing")} ${theme.accent(session.id)}: ${session.title}\n`);
+      }
       continue;
     }
     if (trimmed === "/resume" || trimmed.startsWith("/resume ")) {
@@ -368,6 +401,63 @@ ${kv("Config", configPath())}
         const todo = await addTodo(process.cwd(), text);
         output.write(`${theme.success("Todo added:")} ${theme.accent(todo.id)}\n`);
       }
+      continue;
+    }
+    if (trimmed === "/undo") {
+      output.write(`${await undoLast(process.cwd())}\n`);
+      continue;
+    }
+    if (trimmed === "/redo") {
+      output.write(`${await redoLast(process.cwd())}\n`);
+      continue;
+    }
+    if (trimmed === "/history") {
+      output.write(`${await undoStatus(process.cwd())}\n`);
+      continue;
+    }
+    if (trimmed === "/graph build") {
+      output.write(`${await buildGraph(process.cwd())}\n`);
+      continue;
+    }
+    if (trimmed === "/graph stats" || trimmed === "/graph") {
+      output.write(`${await graphStats(process.cwd())}\n`);
+      continue;
+    }
+    if (trimmed.startsWith("/graph search ")) {
+      output.write(`${await graphSearch(process.cwd(), trimmed.slice("/graph search ".length))}\n`);
+      continue;
+    }
+    if (trimmed.startsWith("/graph impact ")) {
+      output.write(`${await graphImpact(process.cwd(), trimmed.slice("/graph impact ".length))}\n`);
+      continue;
+    }
+    if (trimmed === "/agents") {
+      output.write(`${formatSubagents()}\n`);
+      continue;
+    }
+    if (trimmed.startsWith("/swarm ")) {
+      await runAsk(config, swarmPrompt(trimmed.slice("/swarm ".length)));
+      continue;
+    }
+    if (trimmed === "/accessibility") {
+      output.write(`${JSON.stringify(config.accessibility, null, 2)}\n`);
+      continue;
+    }
+    if (trimmed.startsWith("/accessibility ")) {
+      const [, key, rawValue] = trimmed.split(/\s+/);
+      if (!key || rawValue === undefined || !(key in config.accessibility)) {
+        output.write(`${theme.warning("Use:")} ${theme.command("/accessibility <noColor|reducedMotion|highContrast|screenReader> <on|off>")}\n`);
+        continue;
+      }
+      const value = boolFromString(rawValue);
+      if (value === null) {
+        output.write(`${theme.warning("Use on/off.")}\n`);
+        continue;
+      }
+      config.accessibility[key as keyof typeof config.accessibility] = value;
+      applyAccessibilityEnvironment(config);
+      await saveConfig(config);
+      output.write(`${theme.success("Accessibility updated.")}\n`);
       continue;
     }
     if (trimmed === "/key status") {
@@ -533,6 +623,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
 
 async function main(): Promise<void> {
   const config = await loadConfig();
+  applyAccessibilityEnvironment(config);
   const command = args[0];
 
   try {
@@ -561,6 +652,17 @@ async function main(): Promise<void> {
       case "sessions":
         output.write(`${formatSessionList(await listSessions())}\n`);
         return;
+      case "continue": {
+        const latest = await latestSession();
+        if (!latest) throw new Error("No session to continue.");
+        const prompt = args.slice(1).join(" ").trim();
+        if (prompt) {
+          await runAsk(config, `Continue session ${latest.id}. User continuation: ${prompt}`);
+          return;
+        }
+        await interactive(config, latest.id);
+        return;
+      }
       case "resume": {
         const target = args[1] || (await latestSession())?.id;
         if (!target) throw new Error("No session to resume.");
@@ -611,6 +713,64 @@ async function main(): Promise<void> {
           return;
         }
         throw new Error("Use: ella todo <list|add|done|clear>");
+      }
+      case "undo":
+        output.write(`${await undoLast(process.cwd())}\n`);
+        return;
+      case "redo":
+        output.write(`${await redoLast(process.cwd())}\n`);
+        return;
+      case "history":
+        output.write(`${await undoStatus(process.cwd())}\n`);
+        return;
+      case "graph": {
+        const action = args[1] || "stats";
+        if (action === "build") {
+          output.write(`${await buildGraph(process.cwd())}\n`);
+          return;
+        }
+        if (action === "stats") {
+          output.write(`${await graphStats(process.cwd())}\n`);
+          return;
+        }
+        if (action === "search") {
+          output.write(`${await graphSearch(process.cwd(), args.slice(2).join(" "))}\n`);
+          return;
+        }
+        if (action === "impact") {
+          output.write(`${await graphImpact(process.cwd(), args.slice(2).join(" "))}\n`);
+          return;
+        }
+        throw new Error("Use: ella graph <build|stats|search|impact>");
+      }
+      case "agents":
+        output.write(`${formatSubagents()}\n`);
+        return;
+      case "swarm": {
+        const task = args.slice(1).join(" ").trim();
+        if (!task) throw new Error("Missing task.");
+        await runAsk(config, swarmPrompt(task));
+        return;
+      }
+      case "accessibility": {
+        const action = args[1] || "show";
+        if (action === "show") {
+          output.write(`${JSON.stringify(config.accessibility, null, 2)}\n`);
+          return;
+        }
+        if (action === "set") {
+          const key = args[2] as keyof typeof config.accessibility;
+          const value = boolFromString(args[3] || "");
+          if (!key || value === null || !(key in config.accessibility)) {
+            throw new Error("Use: ella accessibility set <noColor|reducedMotion|highContrast|screenReader> <on|off>");
+          }
+          config.accessibility[key] = value;
+          applyAccessibilityEnvironment(config);
+          await saveConfig(config);
+          output.write(`${theme.success("Accessibility updated.")}\n`);
+          return;
+        }
+        throw new Error("Use: ella accessibility <show|set>");
       }
       case "plan": {
         const task = args.slice(1).join(" ").trim();

@@ -20,6 +20,12 @@ export function defaultConfig(): EllaConfig {
     defaultModel: DEFAULT_MODELS.openai,
     thinkingMode: "balanced",
     approvalMode: "ask",
+    accessibility: {
+      noColor: false,
+      reducedMotion: false,
+      highContrast: false,
+      screenReader: false,
+    },
     providers: {
       openai: { defaultModel: DEFAULT_MODELS.openai },
       anthropic: { defaultModel: DEFAULT_MODELS.anthropic },
@@ -37,6 +43,10 @@ export async function loadConfig(): Promise<EllaConfig> {
     return {
       ...base,
       ...parsed,
+      accessibility: {
+        ...base.accessibility,
+        ...(parsed.accessibility || {}),
+      },
       providers: {
         ...base.providers,
         ...(parsed.providers || {}),
@@ -95,4 +105,14 @@ export function approvalModeFromString(value: string): ApprovalMode | null {
     return normalized;
   }
   return null;
+}
+
+export function applyAccessibilityEnvironment(config: EllaConfig): void {
+  if (config.accessibility.noColor) process.env.NO_COLOR = "1";
+  if (config.accessibility.reducedMotion) process.env.ELLA_NO_ANIMATION = "1";
+  if (config.accessibility.highContrast) process.env.ELLA_HIGH_CONTRAST = "1";
+  if (config.accessibility.screenReader) {
+    process.env.ELLA_SCREEN_READER = "1";
+    process.env.ELLA_NO_ANIMATION = "1";
+  }
 }

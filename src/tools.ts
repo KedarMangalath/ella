@@ -4,6 +4,8 @@ import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promi
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ApprovalMode, ToolCall, ToolContext, ToolDefinition, ToolRisk } from "./types.js";
+import { recordEdit } from "./undo.js";
+import { buildGraph, graphImpact, graphSearch, graphStats } from "./graph.js";
 
 const execAsync = promisify(exec);
 
@@ -184,8 +186,10 @@ export const TOOLS: ToolDefinition[] = [
     async run(input, context) {
       const target = resolveInside(context.cwd, stringArg(input, "path"));
       const content = stringArg(input, "content");
+      const before = await exists(target) ? await readFile(target, "utf8") : null;
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, content, "utf8");
+      await recordEdit(context.cwd, target, before, content, "write_file");
       return `Wrote ${path.relative(context.cwd, target).replaceAll(path.sep, "/")} (${content.length} chars).`;
     },
   },
@@ -207,6 +211,7 @@ export const TOOLS: ToolDefinition[] = [
       if (!before.includes(find)) throw new Error("Exact text not found.");
       const after = before.replace(find, replace);
       await writeFile(target, after, "utf8");
+      await recordEdit(context.cwd, target, before, after, "replace_in_file");
       return `Updated ${path.relative(context.cwd, target).replaceAll(path.sep, "/")}.`;
     },
   },
@@ -252,6 +257,38 @@ export const TOOLS: ToolDefinition[] = [
         maxBuffer: 1024 * 1024 * 5,
       });
       return [stdout, stderr].filter(Boolean).join("\n").trim() || "No diff.";
+    },
+  },
+  {
+    name: "graph_build",
+    description: "Build Ella's lightweight repository graph.",
+    risk: "read",
+    async run(_input, context) {
+      return buildGraph(context.cwd);
+    },
+  },
+  {
+    name: "graph_stats",
+    description: "Show repository graph stats.",
+    risk: "read",
+    async run(_input, context) {
+      return graphStats(context.cwd);
+    },
+  },
+  {
+    name: "graph_search",
+    description: "Search repository graph symbols, imports, and paths.",
+    risk: "read",
+    async run(input, context) {
+      return graphSearch(context.cwd, stringArg(input, "query"));
+    },
+  },
+  {
+    name: "graph_impact",
+    description: "Find files likely impacted by a path or import target.",
+    risk: "read",
+    async run(input, context) {
+      return graphImpact(context.cwd, stringArg(input, "target"));
     },
   },
 ];
