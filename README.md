@@ -6,7 +6,7 @@ It is built to be model-agnostic from day one: bring your own API key, choose a 
 
 ## Status
 
-Ella is early MVP software. The current build has the product spine: CLI commands, first-run setup, provider adapters, model selection, slash commands, permissioned local tools, and project initialization.
+Ella is early sprint software with the main product spine in place: first-run setup, provider adapters, model selection, thinking modes, sessions, slash commands, local tools, undo/redo, repo graph helpers, accessibility settings, and swarm-style workflows.
 
 ## Features
 
@@ -15,8 +15,8 @@ Ella is early MVP software. The current build has the product spine: CLI command
 - Stored API keys with modify/delete support
 - Environment variable API key support
 - Interactive terminal chat
-- Non-interactive `ella ask` mode
-- Persistent session history and resume
+- Non-interactive `ella ask` mode, piped input, and plain-English top-level prompts
+- Persistent session history, saved one-shot runs, and real continuation
 - Claude Code/OpenCode/Gemini CLI-style slash commands
 - Project memory and todo list
 - Agent shortcuts for planning, review, fixing, and explanation
@@ -29,6 +29,23 @@ Ella is early MVP software. The current build has the product spine: CLI command
 - Local coding tools for reading, searching, editing, shell commands, and git inspection
 - Permission modes with edit/shell previews for safer operation
 - Project initialization with `ELLA.md`
+
+## Easiest Path
+
+Run Ella, paste your API key when prompted, then type naturally.
+
+```bash
+node dist/cli.js
+```
+
+You can also skip command memorization:
+
+```bash
+node dist/cli.js "fix the failing tests"
+node dist/cli.js review
+node dist/cli.js continue "keep going"
+git diff | node dist/cli.js review
+```
 
 ## Install
 
@@ -80,22 +97,22 @@ node dist/cli.js setup
 Or set one directly:
 
 ```bash
-node dist/cli.js config set-key openai
-node dist/cli.js config set-key anthropic
-node dist/cli.js config set-key gemini
-node dist/cli.js config set-key openrouter
+node dist/cli.js key set openai
+node dist/cli.js key set anthropic
+node dist/cli.js key set gemini
+node dist/cli.js key set openrouter
 ```
 
 Delete a stored key:
 
 ```bash
-node dist/cli.js config delete-key openai
+node dist/cli.js key delete openai
 ```
 
 Check key status:
 
 ```bash
-node dist/cli.js config key-status
+node dist/cli.js key status
 ```
 
 Environment variables also work:
@@ -112,8 +129,18 @@ OPENROUTER_API_KEY=...
 ```bash
 node dist/cli.js
 node dist/cli.js ask "review this repo"
+node dist/cli.js "fix the failing tests"
 node dist/cli.js setup
 node dist/cli.js commands
+node dist/cli.js status
+node dist/cli.js key status
+node dist/cli.js key set [provider]
+node dist/cli.js key delete [provider]
+node dist/cli.js provider <provider>
+node dist/cli.js model <name-or-number>
+node dist/cli.js think <fast|balanced|deep|max>
+node dist/cli.js approval <ask|auto-edit|full-auto|read-only>
+node dist/cli.js base-url <provider> <url>
 node dist/cli.js sessions
 node dist/cli.js continue [prompt]
 node dist/cli.js resume [session-id]
@@ -135,6 +162,7 @@ node dist/cli.js graph search "EllaAgent"
 node dist/cli.js graph impact "src/tools.ts"
 node dist/cli.js agents
 node dist/cli.js swarm "Add MCP support"
+git diff | node dist/cli.js review
 node dist/cli.js accessibility show
 node dist/cli.js accessibility set reducedMotion on
 node dist/cli.js init
@@ -236,6 +264,8 @@ Inside interactive mode:
 ## Sessions
 
 Ella saves interactive sessions under `~/.ella/sessions`.
+
+One-shot prompts are saved too, so `continue` works after both interactive and non-interactive runs.
 
 ```bash
 node dist/cli.js sessions
@@ -382,6 +412,10 @@ Current tools:
 - `run_shell`
 - `git_status`
 - `git_diff`
+- `graph_build`
+- `graph_stats`
+- `graph_search`
+- `graph_impact`
 
 Edit and shell tools are permissioned according to the active approval mode.
 
@@ -405,21 +439,19 @@ This creates:
 ## Roadmap
 
 - Streaming model output
-- Session history and resume
-- Better terminal UI
 - MCP client support
-- Code-review-graph integration
 - Project memory and compaction
-- Subagents for planning, exploration, coding, review, and testing
 - Safer patch previews
 - Test/build auto-repair loop
+- Real concurrent subagent execution
+- Deeper code-review-graph integration
 
 ## Security
 
 Do not commit API keys. Ella stores local keys in `~/.ella/config.json` by default. You can remove them with:
 
 ```bash
-node dist/cli.js config delete-key <provider>
+node dist/cli.js key delete <provider>
 ```
 
 For shared machines, prefer environment variables or a dedicated secret manager.

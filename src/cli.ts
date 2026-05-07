@@ -41,6 +41,7 @@ import { ellaStill } from "./animation.js";
 import { redoLast, undoLast, undoStatus } from "./undo.js";
 import { buildGraph, graphImpact, graphSearch, graphStats } from "./graph.js";
 import { formatSubagents, swarmPrompt } from "./subagents.js";
+import type { SessionRecord } from "./types.js";
 
 const args = process.argv.slice(2);
 
@@ -52,9 +53,16 @@ ${theme.header("Usage")}
   ${theme.command("ella ask <prompt>")}
   ${theme.command("ella setup")}
   ${theme.command("ella commands")}
+  ${theme.command("ella status")}
   ${theme.command("ella sessions")}
   ${theme.command("ella continue [prompt]")}
   ${theme.command("ella resume [session-id]")}
+  ${theme.command("ella key <status|set|delete> [provider]")}
+  ${theme.command("ella provider <provider>")}
+  ${theme.command("ella model <name-or-number>")}
+  ${theme.command("ella think <fast|balanced|deep|max>")}
+  ${theme.command("ella approval <ask|auto-edit|full-auto|read-only>")}
+  ${theme.command("ella base-url <provider> <url>")}
   ${theme.command("ella memory <show|add|clear>")}
   ${theme.command("ella todo <list|add|done|clear>")}
   ${theme.command("ella undo|redo|history")}
@@ -80,6 +88,7 @@ ${theme.header("Usage")}
   ${theme.command("ella config set-approval <ask|auto-edit|full-auto|read-only>")}
 
 ${theme.header("Providers")} ${theme.accent("openai, anthropic, gemini, openrouter")}
+${theme.muted("Tip: you can also type plain English, e.g. ella fix the failing tests")}
 `);
 }
 
@@ -130,6 +139,47 @@ function pickModel(provider: ProviderName, answer: string): string | null {
     return MODEL_CATALOG[provider][asIndex - 1] ?? null;
   }
   return trimmed;
+}
+
+async function readPipedInput(): Promise<string> {
+  if (input.isTTY) return "";
+  const chunks: Buffer[] = [];
+  for await (const chunk of input) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8").trim();
+}
+
+async function promptFromArgs(startIndex: number): Promise<string> {
+  const typed = args.slice(startIndex).join(" ").trim();
+  const piped = await readPipedInput();
+  return [typed, piped].filter(Boolean).join("\n\n");
+}
+
+function statusText(config: EllaConfig): string {
+  return `${kv("Provider", config.defaultProvider)}
+${kv("Model", config.defaultModel)}
+${kv("Thinking", config.thinkingMode)}
+${kv("Approval", config.approvalMode)}
+${kv("Key", keyStatus(config, config.defaultProvider))}
+${kv("Config", configPath())}`;
+}
+
+function nextSteps(config: EllaConfig): string {
+  if (keyStatus(config, config.defaultProvider) === "missing") {
+    return `${theme.warning("Next:")} ${theme.command("ella setup")} ${theme.muted("or")} ${theme.command("ella key set")}`;
+  }
+  return `${theme.success("Ready.")} ${theme.command("ella \"fix the failing tests\"")} ${theme.muted("or")} ${theme.command("ella review")}`;
+}
+
+async function doctor(config: EllaConfig): Promise<void> {
+  output.write(`${theme.header("Ella Doctor")}\n`);
+  output.write(`${statusText(config)}\n`);
+  output.write(`${kv("Node", process.version)}\n`);
+  output.write(`${kv("CWD", process.cwd())}\n`);
+  output.write(`${kv("Sessions", String((await listSessions()).length))}\n`);
+  output.write(`${kv("Undo", await undoStatus(process.cwd()))}\n`);
+  output.write(`${nextSteps(config)}\n`);
 }
 
 async function setupWizard(config: EllaConfig): Promise<void> {
@@ -205,11 +255,29 @@ async function contextPrefix(cwd: string): Promise<string> {
 
 async function runAsk(config: EllaConfig, prompt: string): Promise<void> {
   await ensureConfigured(config);
+  const session = await createSession(config, process.cwd());
+  await runSessionPrompt(config, session, prompt);
+  output.write(`${theme.muted(`Session saved: ${session.id}. Continue with: ella continue "..."`)}\n`);
+}
+
+async function runSessionPrompt(config: EllaConfig, session: SessionRecord, prompt: string): Promise<SessionRecord> {
+  await ensureConfigured(config);
   const prefix = await contextPrefix(process.cwd());
   const fullPrompt = prefix ? `${prefix}\n\nUser request:\n${prompt}` : prompt;
   const provider = createProvider(config, config.defaultProvider);
   const agent = new EllaAgent(provider, config);
-  await agent.run({ cwd: process.cwd(), prompt: fullPrompt });
+  const result = await agent.run({
+    cwd: process.cwd(),
+    prompt: fullPrompt,
+    messages: session.messages,
+  });
+  appendPair(session, prompt, result.messages);
+  session.cwd = process.cwd();
+  session.provider = config.defaultProvider;
+  session.model = config.defaultModel;
+  session.thinkingMode = config.thinkingMode;
+  await saveSession(session);
+  return session;
 }
 
 async function interactive(config: EllaConfig, resumeSessionId?: string): Promise<void> {
@@ -229,7 +297,8 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
   output.write(`${ellaStill("ready")}\n`);
   output.write(`${theme.brand("Ella")} ${theme.accent(`${config.defaultProvider}/${config.defaultModel}`)} ${theme.muted(`thinking=${config.thinkingMode} approval=${config.approvalMode}`)}\n`);
   output.write(`${kv("Session", `${session.id} (${session.title})`)}\n`);
-  output.write(`${theme.muted("Type /commands for commands, /exit to quit.")}\n\n`);
+  output.write(`${theme.muted("Type naturally, or use /commands. /exit quits.")}\n`);
+  output.write(`${theme.muted("Useful starts: /fix <problem>, /review, /plan <task>, /key set.")}\n\n`);
 
   while (true) {
     const line = await promptLine("ella> ");
@@ -245,14 +314,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
       continue;
     }
     if (trimmed === "/status") {
-      output.write(`${kv("Provider", config.defaultProvider)}
-${kv("Model", config.defaultModel)}
-${kv("Thinking", config.thinkingMode)}
-${kv("Approval", config.approvalMode)}
-${kv("Key", keyStatus(config, config.defaultProvider))}
-${kv("Session", `${session.id} (${session.title})`)}
-${kv("Config", configPath())}
-`);
+      output.write(`${statusText(config)}\n${kv("Session", `${session.id} (${session.title})`)}\n${nextSteps(config)}\n`);
       continue;
     }
     if (trimmed === "/sessions") {
@@ -268,7 +330,7 @@ ${kv("Config", configPath())}
       }
       session = await loadSession(target);
       if (extra) {
-        await runAsk(config, `Continue session ${session.id}. User continuation: ${extra}`);
+        session = await runSessionPrompt(config, session, extra);
       } else {
         output.write(`${theme.success("Continuing")} ${theme.accent(session.id)}: ${session.title}\n`);
       }
@@ -436,7 +498,7 @@ ${kv("Config", configPath())}
       continue;
     }
     if (trimmed.startsWith("/swarm ")) {
-      await runAsk(config, swarmPrompt(trimmed.slice("/swarm ".length)));
+      session = await runSessionPrompt(config, session, swarmPrompt(trimmed.slice("/swarm ".length)));
       continue;
     }
     if (trimmed === "/accessibility") {
@@ -501,39 +563,25 @@ ${kv("Config", configPath())}
       continue;
     }
     if (trimmed.startsWith("/plan ")) {
-      await runAsk(config, `Create a concrete implementation plan for this task. Read relevant files first if needed. Task: ${trimmed.slice("/plan ".length)}`);
+      session = await runSessionPrompt(config, session, `Create a concrete implementation plan for this task. Read relevant files first if needed. Task: ${trimmed.slice("/plan ".length)}`);
       continue;
     }
     if (trimmed === "/review" || trimmed.startsWith("/review ")) {
       const focus = trimmed.slice("/review".length).trim();
-      await runAsk(config, `Review this repository or current git diff. Prioritize bugs, regressions, missing tests, and risky design issues. Focus: ${focus || "general code review"}`);
+      session = await runSessionPrompt(config, session, `Review this repository or current git diff. Prioritize bugs, regressions, missing tests, and risky design issues. Focus: ${focus || "general code review"}`);
       continue;
     }
     if (trimmed.startsWith("/fix ")) {
-      await runAsk(config, `Debug and fix this problem end to end. Read files, edit safely, and run relevant checks. Problem: ${trimmed.slice("/fix ".length)}`);
+      session = await runSessionPrompt(config, session, `Debug and fix this problem end to end. Read files, edit safely, and run relevant checks. Problem: ${trimmed.slice("/fix ".length)}`);
       continue;
     }
     if (trimmed.startsWith("/explain ")) {
-      await runAsk(config, `Explain this using repository context. Read relevant files first if useful. Topic: ${trimmed.slice("/explain ".length)}`);
+      session = await runSessionPrompt(config, session, `Explain this using repository context. Read relevant files first if useful. Topic: ${trimmed.slice("/explain ".length)}`);
       continue;
     }
 
     try {
-      await ensureConfigured(config);
-      const prefix = await contextPrefix(process.cwd());
-      const fullPrompt = prefix ? `${prefix}\n\nUser request:\n${trimmed}` : trimmed;
-      const provider = createProvider(config, config.defaultProvider);
-      const agent = new EllaAgent(provider, config);
-      const result = await agent.run({
-        cwd: process.cwd(),
-        prompt: fullPrompt,
-        messages: session.messages,
-      });
-      appendPair(session, trimmed, result.messages);
-      session.provider = config.defaultProvider;
-      session.model = config.defaultModel;
-      session.thinkingMode = config.thinkingMode;
-      await saveSession(session);
+      session = await runSessionPrompt(config, session, trimmed);
     } catch (error) {
       output.write(`${theme.danger("Error:")} ${error instanceof Error ? error.message : String(error)}\n`);
     }
@@ -621,6 +669,33 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
   }
 }
 
+async function handleKey(config: EllaConfig, subArgs: string[]): Promise<void> {
+  const action = subArgs[0] || "status";
+  if (action === "status") {
+    for (const provider of Object.keys(config.providers) as ProviderName[]) {
+      output.write(`${kv(provider, keyStatus(config, provider))}\n`);
+    }
+    return;
+  }
+  if (action === "set" || action === "add") {
+    const provider = subArgs[1] ? requireProvider(subArgs[1]) : config.defaultProvider;
+    const key = subArgs.slice(2).join(" ").trim() || await promptLine(`Paste API key for ${provider}: `);
+    if (!key.trim()) throw new Error("No key provided.");
+    config.providers[provider] = { ...config.providers[provider], apiKey: key.trim() };
+    await saveConfig(config);
+    output.write(`${theme.success("Saved key for")} ${theme.accent(provider)}.\n`);
+    return;
+  }
+  if (action === "delete" || action === "remove" || action === "clear") {
+    const provider = subArgs[1] ? requireProvider(subArgs[1]) : config.defaultProvider;
+    delete config.providers[provider].apiKey;
+    await saveConfig(config);
+    output.write(`${theme.success("Deleted stored key for")} ${theme.accent(provider)}. Env key status: ${theme.accent(envKeyForProvider(provider) ? "present" : "missing")}.\n`);
+    return;
+  }
+  throw new Error("Use: ella key <status|set|delete> [provider]");
+}
+
 async function main(): Promise<void> {
   const config = await loadConfig();
   applyAccessibilityEnvironment(config);
@@ -629,6 +704,13 @@ async function main(): Promise<void> {
   try {
     switch (command) {
       case undefined:
+        if (!input.isTTY) {
+          const piped = await readPipedInput();
+          if (piped) {
+            await runAsk(config, piped);
+            return;
+          }
+        }
         await interactive(config);
         return;
       case "help":
@@ -638,7 +720,7 @@ async function main(): Promise<void> {
         return;
       case "ask":
       case "run": {
-        const prompt = args.slice(1).join(" ").trim();
+        const prompt = await promptFromArgs(1);
         if (!prompt) throw new Error("Missing prompt.");
         await runAsk(config, prompt);
         return;
@@ -649,15 +731,23 @@ async function main(): Promise<void> {
       case "commands":
         output.write(slashCommandHelp());
         return;
+      case "status":
+        output.write(`${statusText(config)}\n${nextSteps(config)}\n`);
+        return;
+      case "quickstart":
+      case "ready":
+        output.write(`${statusText(config)}\n${nextSteps(config)}\n\n`);
+        printHelp();
+        return;
       case "sessions":
         output.write(`${formatSessionList(await listSessions())}\n`);
         return;
       case "continue": {
         const latest = await latestSession();
         if (!latest) throw new Error("No session to continue.");
-        const prompt = args.slice(1).join(" ").trim();
+        const prompt = await promptFromArgs(1);
         if (prompt) {
-          await runAsk(config, `Continue session ${latest.id}. User continuation: ${prompt}`);
+          await runSessionPrompt(config, latest, prompt);
           return;
         }
         await interactive(config, latest.id);
@@ -747,9 +837,57 @@ async function main(): Promise<void> {
         output.write(`${formatSubagents()}\n`);
         return;
       case "swarm": {
-        const task = args.slice(1).join(" ").trim();
+        const task = await promptFromArgs(1);
         if (!task) throw new Error("Missing task.");
         await runAsk(config, swarmPrompt(task));
+        return;
+      }
+      case "key":
+        await handleKey(config, args.slice(1));
+        return;
+      case "provider": {
+        const provider = requireProvider(args[1] || "");
+        config.defaultProvider = provider;
+        config.defaultModel = config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
+        await saveConfig(config);
+        output.write(`${theme.success("Provider set:")} ${theme.accent(provider)}. Model: ${theme.accent(config.defaultModel)}. Key: ${theme.accent(keyStatus(config, provider))}\n`);
+        return;
+      }
+      case "model": {
+        const selectedModel = pickModel(config.defaultProvider, args.slice(1).join(" "));
+        if (!selectedModel) {
+          output.write(renderModels(config.defaultProvider));
+          return;
+        }
+        config.defaultModel = selectedModel;
+        config.providers[config.defaultProvider].defaultModel = selectedModel;
+        await saveConfig(config);
+        output.write(`${theme.success("Model set:")} ${theme.accent(config.defaultModel)}\n`);
+        return;
+      }
+      case "think": {
+        const mode = thinkingModeFromString(args[1] || "");
+        if (!mode) throw new Error("Use: ella think <fast|balanced|deep|max>");
+        config.thinkingMode = mode;
+        await saveConfig(config);
+        output.write(`${theme.success("Thinking mode set:")} ${theme.accent(mode)}\n`);
+        return;
+      }
+      case "approval": {
+        const mode = approvalModeFromString(args[1] || "");
+        if (!mode) throw new Error("Use: ella approval <ask|auto-edit|full-auto|read-only>");
+        config.approvalMode = mode;
+        await saveConfig(config);
+        output.write(`${theme.success("Approval mode set:")} ${theme.accent(mode)}\n`);
+        return;
+      }
+      case "base-url": {
+        const provider = requireProvider(args[1] || "");
+        const url = args.slice(2).join(" ").trim();
+        if (!url) throw new Error("Use: ella base-url <provider> <url>");
+        config.providers[provider] = { ...config.providers[provider], baseUrl: url };
+        await saveConfig(config);
+        output.write(`${theme.success("Base URL set for")} ${theme.accent(provider)}.\n`);
         return;
       }
       case "accessibility": {
@@ -773,24 +911,24 @@ async function main(): Promise<void> {
         throw new Error("Use: ella accessibility <show|set>");
       }
       case "plan": {
-        const task = args.slice(1).join(" ").trim();
+        const task = await promptFromArgs(1);
         if (!task) throw new Error("Missing task.");
         await runAsk(config, `Create a concrete implementation plan for this task. Read relevant files first if needed. Task: ${task}`);
         return;
       }
       case "review": {
-        const focus = args.slice(1).join(" ").trim();
+        const focus = await promptFromArgs(1);
         await runAsk(config, `Review this repository or current git diff. Prioritize bugs, regressions, missing tests, and risky design issues. Focus: ${focus || "general code review"}`);
         return;
       }
       case "fix": {
-        const problem = args.slice(1).join(" ").trim();
+        const problem = await promptFromArgs(1);
         if (!problem) throw new Error("Missing problem.");
         await runAsk(config, `Debug and fix this problem end to end. Read files, edit safely, and run relevant checks. Problem: ${problem}`);
         return;
       }
       case "explain": {
-        const topic = args.slice(1).join(" ").trim();
+        const topic = await promptFromArgs(1);
         if (!topic) throw new Error("Missing topic.");
         await runAsk(config, `Explain this using repository context. Read relevant files first if useful. Topic: ${topic}`);
         return;
@@ -812,20 +950,14 @@ async function main(): Promise<void> {
         output.write(`${toolHelp()}\n`);
         return;
       case "doctor":
-        output.write(`${kv("Node", process.version)}\n`);
-        output.write(`${kv("CWD", process.cwd())}\n`);
-        output.write(`${kv("Config", configPath())}\n`);
-        output.write(`${kv("Provider", config.defaultProvider)}\n`);
-        output.write(`${kv("Model", config.defaultModel)}\n`);
-        output.write(`${kv("Thinking", config.thinkingMode)}\n`);
-        output.write(`${kv("Approval", config.approvalMode)}\n`);
+        await doctor(config);
         return;
       case "config":
         await handleConfig(config, args.slice(1));
         return;
       default:
-        printHelp();
-        throw new Error(`Unknown command: ${command}`);
+        await runAsk(config, await promptFromArgs(0));
+        return;
     }
   } catch (error) {
     output.write(`${theme.danger("Error:")} ${error instanceof Error ? error.message : String(error)}\n`);
