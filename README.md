@@ -21,6 +21,7 @@ Ella is early MVP software. The current build has the product spine: CLI command
 - Project memory and todo list
 - Agent shortcuts for planning, review, fixing, and explanation
 - Purple-mauve terminal palette with `NO_COLOR` support
+- Animated line-based Ella character during startup, thinking, and tool execution
 - Local coding tools for reading, searching, editing, shell commands, and git inspection
 - Permission modes with edit/shell previews for safer operation
 - Project initialization with `ELLA.md`
@@ -139,6 +140,8 @@ node dist/cli.js config set-approval <ask|auto-edit|full-auto|read-only>
 
 Ella uses a purple-mauve ANSI palette for prompts, headers, commands, status labels, success messages, warnings, errors, and tool activity.
 
+Ella also renders a small line-based character in the CLI. The character is static on startup/setup and animated while Ella is thinking or running tools.
+
 Disable color:
 
 ```bash
@@ -149,6 +152,12 @@ Force color in environments that do not expose a TTY:
 
 ```bash
 FORCE_COLOR=1 node dist/cli.js commands
+```
+
+Disable animation only:
+
+```bash
+ELLA_NO_ANIMATION=1 node dist/cli.js
 ```
 
 Providers:

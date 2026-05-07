@@ -36,6 +36,7 @@ import {
   saveSession,
 } from "./session.js";
 import { kv, slashCommandHelp, theme } from "./theme.js";
+import { ellaStill } from "./animation.js";
 
 const args = process.argv.slice(2);
 
@@ -115,7 +116,8 @@ function pickModel(provider: ProviderName, answer: string): string | null {
 }
 
 async function setupWizard(config: EllaConfig): Promise<void> {
-  output.write(`\n${theme.brand("Ella setup")}\n`);
+  output.write(`\n${ellaStill("setup")}\n`);
+  output.write(`${theme.brand("Ella setup")}\n`);
   output.write(`${theme.muted("Paste key here once. Ella remembers it in global config.")}\n\n`);
 
   output.write(`${theme.header("Providers")}\n${theme.command("1. openai")}\n${theme.command("2. anthropic")}\n${theme.command("3. gemini")}\n${theme.command("4. openrouter")}\n`);
@@ -206,6 +208,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
   session.thinkingMode = config.thinkingMode;
   await saveSession(session);
 
+  output.write(`${ellaStill("ready")}\n`);
   output.write(`${theme.brand("Ella")} ${theme.accent(`${config.defaultProvider}/${config.defaultModel}`)} ${theme.muted(`thinking=${config.thinkingMode} approval=${config.approvalMode}`)}\n`);
   output.write(`${kv("Session", `${session.id} (${session.title})`)}\n`);
   output.write(`${theme.muted("Type /commands for commands, /exit to quit.")}\n\n`);

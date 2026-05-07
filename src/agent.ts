@@ -5,6 +5,7 @@ import { maxOutputTokensForThinking } from "./models.js";
 import { systemPrompt } from "./prompts.js";
 import { parseToolCalls, runToolCall } from "./tools.js";
 import { theme } from "./theme.js";
+import { withEllaAnimation } from "./animation.js";
 
 export interface AgentRunOptions {
   cwd: string;
@@ -51,12 +52,16 @@ export class EllaAgent {
     const maxTurns = 8;
 
     for (let turn = 0; turn < maxTurns; turn += 1) {
-      const response = await this.provider.complete(messages, {
-        provider: this.provider.name,
-        model: this.config.defaultModel,
-        thinkingMode: this.config.thinkingMode,
-        maxOutputTokens: maxOutputTokensForThinking(this.config.thinkingMode),
-      });
+      const response = await withEllaAnimation(
+        `thinking with ${this.provider.name}/${this.config.defaultModel}`,
+        "think",
+        () => this.provider.complete(messages, {
+          provider: this.provider.name,
+          model: this.config.defaultModel,
+          thinkingMode: this.config.thinkingMode,
+          maxOutputTokens: maxOutputTokensForThinking(this.config.thinkingMode),
+        }),
+      );
 
       messages.push({ role: "assistant", content: response });
       const visible = visibleAssistantText(response);
@@ -71,11 +76,15 @@ export class EllaAgent {
       const toolResults: string[] = [];
       for (const call of calls) {
         output.write(`\n${theme.tool("[tool]")} ${theme.accent(call.name)}\n`);
-        const result = await runToolCall(call, {
-          cwd: options.cwd,
-          approvalMode: this.config.approvalMode,
-          askApproval,
-        });
+        const result = await withEllaAnimation(
+          `running ${call.name}`,
+          "tool",
+          () => runToolCall(call, {
+            cwd: options.cwd,
+            approvalMode: this.config.approvalMode,
+            askApproval,
+          }),
+        );
         output.write(`${theme.muted(result.slice(0, 1200))}${result.length > 1200 ? `\n${theme.muted("[truncated]")}` : ""}\n`);
         toolResults.push(`<ella_tool_result name="${call.name}">\n${result}\n</ella_tool_result>`);
       }
