@@ -16,9 +16,12 @@ Ella is early MVP software. The current build has the product spine: CLI command
 - Environment variable API key support
 - Interactive terminal chat
 - Non-interactive `ella ask` mode
+- Persistent session history and resume
 - Claude Code/OpenCode/Gemini CLI-style slash commands
+- Project memory and todo list
+- Agent shortcuts for planning, review, fixing, and explanation
 - Local coding tools for reading, searching, editing, shell commands, and git inspection
-- Permission modes for safer operation
+- Permission modes with edit/shell previews for safer operation
 - Project initialization with `ELLA.md`
 
 ## Install
@@ -105,6 +108,17 @@ node dist/cli.js
 node dist/cli.js ask "review this repo"
 node dist/cli.js setup
 node dist/cli.js commands
+node dist/cli.js sessions
+node dist/cli.js resume [session-id]
+node dist/cli.js memory show
+node dist/cli.js memory add "Use strict TypeScript."
+node dist/cli.js todo list
+node dist/cli.js todo add "Add streaming responses"
+node dist/cli.js todo done <todo-id>
+node dist/cli.js plan "Add MCP support"
+node dist/cli.js review
+node dist/cli.js fix "Tests fail in provider parsing"
+node dist/cli.js explain "How tool permissions work"
 node dist/cli.js init
 node dist/cli.js models
 node dist/cli.js tools
@@ -147,6 +161,9 @@ Inside interactive mode:
 /exit, /quit
 /setup
 /status
+/sessions
+/resume [session-id]
+/new
 /config
 /tools
 /models [provider]
@@ -157,7 +174,62 @@ Inside interactive mode:
 /key status
 /key set [provider]
 /key delete [provider]
+/memory show|add|clear
+/todo list|add|done|clear
+/plan <task>
+/review [focus]
+/fix <problem>
+/explain <topic>
 /base-url <provider> <url>
+```
+
+## Sessions
+
+Ella saves interactive sessions under `~/.ella/sessions`.
+
+```bash
+node dist/cli.js sessions
+node dist/cli.js resume
+node dist/cli.js resume <session-id>
+```
+
+Inside interactive mode:
+
+```text
+/sessions
+/resume <session-id>
+/new
+```
+
+## Project Memory
+
+Project memory is local to the current repo under `.ella/memory.md`.
+
+```bash
+node dist/cli.js memory show
+node dist/cli.js memory add "Prefer small modules and strict types."
+node dist/cli.js memory clear
+```
+
+Inside interactive mode:
+
+```text
+/memory show
+/memory add Prefer small modules and strict types.
+/memory clear
+```
+
+Ella automatically includes project memory in future prompts.
+
+## Todos
+
+Todos are stored under `.ella/todos.json` and injected into future prompts.
+
+```bash
+node dist/cli.js todo list
+node dist/cli.js todo add "Implement MCP support"
+node dist/cli.js todo done <todo-id>
+node dist/cli.js todo clear
 ```
 
 ## Local Tools
@@ -180,6 +252,8 @@ Current tools:
 - `git_diff`
 
 Edit and shell tools are permissioned according to the active approval mode.
+
+In `ask` mode, Ella previews edits and shell commands before running them.
 
 ## Project Init
 
@@ -225,4 +299,3 @@ npm install
 npm run build
 npm run check
 ```
-

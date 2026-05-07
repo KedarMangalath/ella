@@ -9,6 +9,12 @@ export interface AgentRunOptions {
   cwd: string;
   prompt: string;
   interactive?: boolean;
+  messages?: ChatMessage[];
+}
+
+export interface AgentRunResult {
+  text: string;
+  messages: ChatMessage[];
 }
 
 function visibleAssistantText(text: string): string {
@@ -31,11 +37,14 @@ export class EllaAgent {
     private readonly config: EllaConfig,
   ) {}
 
-  async run(options: AgentRunOptions): Promise<string> {
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt(this.config.thinkingMode) },
-      { role: "user", content: options.prompt },
-    ];
+  async run(options: AgentRunOptions): Promise<AgentRunResult> {
+    const messages: ChatMessage[] = options.messages?.length
+      ? [...options.messages]
+      : [{ role: "system", content: systemPrompt(this.config.thinkingMode) }];
+    if (!messages.some((message) => message.role === "system")) {
+      messages.unshift({ role: "system", content: systemPrompt(this.config.thinkingMode) });
+    }
+    messages.push({ role: "user", content: options.prompt });
 
     let lastVisible = "";
     const maxTurns = 8;
@@ -56,7 +65,7 @@ export class EllaAgent {
       }
 
       const calls = parseToolCalls(response);
-      if (!calls.length) return lastVisible || response;
+      if (!calls.length) return { text: lastVisible || response, messages };
 
       const toolResults: string[] = [];
       for (const call of calls) {
@@ -76,6 +85,6 @@ export class EllaAgent {
       });
     }
 
-    return lastVisible || "Stopped after maximum tool turns.";
+    return { text: lastVisible || "Stopped after maximum tool turns.", messages };
   }
 }

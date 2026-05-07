@@ -99,8 +99,24 @@ function isAllowed(mode: ApprovalMode, risk: ToolRisk): boolean {
 
 async function ensureApproval(tool: ToolDefinition, input: Record<string, unknown>, context: ToolContext): Promise<void> {
   if (isAllowed(context.approvalMode, tool.risk)) return;
-  const approved = await context.askApproval(`Allow ${tool.risk} tool ${tool.name} with ${JSON.stringify(input)}?`);
+  const preview = tool.preview ? await tool.preview(input, context) : JSON.stringify(input);
+  const approved = await context.askApproval(`Allow ${tool.risk} tool ${tool.name}?\n${preview}`);
   if (!approved) throw new Error(`User denied ${tool.name}.`);
+}
+
+function previewText(text: string, maxLines = 80): string {
+  const lines = text.split(/\r?\n/);
+  const shown = lines.slice(0, maxLines).join("\n");
+  return lines.length > maxLines ? `${shown}\n... ${lines.length - maxLines} more lines` : shown;
+}
+
+async function fileEditPreview(target: string, content: string, cwd: string): Promise<string> {
+  const rel = path.relative(cwd, target).replaceAll(path.sep, "/");
+  if (!await exists(target)) {
+    return `Create ${rel}\n--- new content ---\n${previewText(content)}`;
+  }
+  const before = await readTextLimited(target, 24_000);
+  return `Overwrite ${rel}\n--- current ---\n${previewText(before, 40)}\n--- new ---\n${previewText(content, 40)}`;
 }
 
 export const TOOLS: ToolDefinition[] = [
@@ -161,6 +177,10 @@ export const TOOLS: ToolDefinition[] = [
     name: "write_file",
     description: "Create or fully overwrite a workspace file.",
     risk: "edit",
+    async preview(input, context) {
+      const target = resolveInside(context.cwd, stringArg(input, "path"));
+      return fileEditPreview(target, stringArg(input, "content"), context.cwd);
+    },
     async run(input, context) {
       const target = resolveInside(context.cwd, stringArg(input, "path"));
       const content = stringArg(input, "content");
@@ -173,6 +193,11 @@ export const TOOLS: ToolDefinition[] = [
     name: "replace_in_file",
     description: "Replace exact text inside a workspace file.",
     risk: "edit",
+    async preview(input, context) {
+      const target = resolveInside(context.cwd, stringArg(input, "path"));
+      const rel = path.relative(context.cwd, target).replaceAll(path.sep, "/");
+      return `Replace in ${rel}\n--- find ---\n${previewText(stringArg(input, "find"), 40)}\n--- replace ---\n${previewText(stringArg(input, "replace"), 40)}`;
+    },
     async run(input, context) {
       const target = resolveInside(context.cwd, stringArg(input, "path"));
       const find = stringArg(input, "find");
@@ -189,6 +214,10 @@ export const TOOLS: ToolDefinition[] = [
     name: "run_shell",
     description: "Run a shell command in the workspace.",
     risk: "shell",
+    async preview(input, context) {
+      const cwd = resolveInside(context.cwd, stringArg(input, "cwd", "."));
+      return `cwd: ${path.relative(context.cwd, cwd) || "."}\ncommand: ${stringArg(input, "command")}`;
+    },
     async run(input, context) {
       const command = stringArg(input, "command");
       if (!command) throw new Error("run_shell requires command.");

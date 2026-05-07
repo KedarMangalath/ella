@@ -16,6 +16,25 @@ import { DEFAULT_MODELS, MODEL_CATALOG, providerFromString, thinkingModeFromStri
 import type { EllaConfig, ProviderName } from "./types.js";
 import { initProject, readProjectInstructions } from "./project.js";
 import { toolHelp } from "./tools.js";
+import {
+  addMemory,
+  addTodo,
+  clearMemory,
+  clearTodos,
+  completeTodo,
+  formatTodos,
+  readMemory,
+  readTodos,
+} from "./memory.js";
+import {
+  appendPair,
+  createSession,
+  formatSessionList,
+  latestSession,
+  listSessions,
+  loadSession,
+  saveSession,
+} from "./session.js";
 
 const args = process.argv.slice(2);
 
@@ -24,6 +43,9 @@ const SLASH_COMMAND_HELP = `Slash commands:
 /exit, /quit                   Quit Ella
 /setup                         Run setup wizard
 /status                        Show active provider/model/settings
+/sessions                      List saved sessions
+/resume [session-id]           Resume saved session
+/new                           Start new session
 /config                        Show masked config
 /tools                         Show local tools
 /models [provider]             Show model catalog
@@ -34,6 +56,12 @@ const SLASH_COMMAND_HELP = `Slash commands:
 /key status                    Show key status
 /key set [provider]            Paste and save API key
 /key delete [provider]         Delete stored API key
+/memory show|add|clear         Project memory
+/todo list|add|done|clear      Project todo list
+/plan <task>                   Produce implementation plan
+/review [focus]                Review repo/diff for issues
+/fix <problem>                 Debug and fix problem
+/explain <topic>               Explain code/topic using repo context
 /base-url <provider> <url>     Set custom provider base URL
 `;
 
@@ -45,6 +73,14 @@ Usage:
   ella ask <prompt>
   ella setup
   ella commands
+  ella sessions
+  ella resume [session-id]
+  ella memory <show|add|clear>
+  ella todo <list|add|done|clear>
+  ella plan <task>
+  ella review [focus]
+  ella fix <problem>
+  ella explain <topic>
   ella init
   ella models [provider]
   ella tools
@@ -160,23 +196,44 @@ async function ensureConfigured(config: EllaConfig): Promise<void> {
   }
 }
 
+async function contextPrefix(cwd: string): Promise<string> {
+  const [instructions, memory, todos] = await Promise.all([
+    readProjectInstructions(cwd),
+    readMemory(cwd),
+    readTodos(cwd),
+  ]);
+  const parts: string[] = [];
+  if (instructions) parts.push(`Project instructions:\n${instructions}`);
+  if (memory) parts.push(`Project memory:\n${memory}`);
+  const pendingTodos = todos.filter((todo) => todo.status !== "done");
+  if (pendingTodos.length) parts.push(`Project todos:\n${formatTodos(pendingTodos)}`);
+  return parts.join("\n\n");
+}
+
 async function runAsk(config: EllaConfig, prompt: string): Promise<void> {
   await ensureConfigured(config);
-  const instructions = await readProjectInstructions(process.cwd());
-  const fullPrompt = instructions
-    ? `Project instructions:\n${instructions}\n\nUser request:\n${prompt}`
-    : prompt;
+  const prefix = await contextPrefix(process.cwd());
+  const fullPrompt = prefix ? `${prefix}\n\nUser request:\n${prompt}` : prompt;
   const provider = createProvider(config, config.defaultProvider);
   const agent = new EllaAgent(provider, config);
   await agent.run({ cwd: process.cwd(), prompt: fullPrompt });
 }
 
-async function interactive(config: EllaConfig): Promise<void> {
+async function interactive(config: EllaConfig, resumeSessionId?: string): Promise<void> {
   if (!apiKeyForProvider(config, config.defaultProvider)) {
     await setupWizard(config);
   }
 
+  let session = resumeSessionId
+    ? await loadSession(resumeSessionId)
+    : await createSession(config, process.cwd());
+  session.provider = config.defaultProvider;
+  session.model = config.defaultModel;
+  session.thinkingMode = config.thinkingMode;
+  await saveSession(session);
+
   output.write(`Ella ${config.defaultProvider}/${config.defaultModel} thinking=${config.thinkingMode} approval=${config.approvalMode}\n`);
+  output.write(`Session ${session.id}: ${session.title}\n`);
   output.write("Type /commands for commands, /exit to quit.\n\n");
 
   while (true) {
@@ -198,8 +255,29 @@ Model: ${config.defaultModel}
 Thinking: ${config.thinkingMode}
 Approval: ${config.approvalMode}
 Key: ${keyStatus(config, config.defaultProvider)}
+Session: ${session.id} (${session.title})
 Config: ${configPath()}
 `);
+      continue;
+    }
+    if (trimmed === "/sessions") {
+      output.write(`${formatSessionList(await listSessions())}\n`);
+      continue;
+    }
+    if (trimmed === "/resume" || trimmed.startsWith("/resume ")) {
+      const requested = trimmed.slice("/resume".length).trim();
+      const target = requested || (await latestSession())?.id;
+      if (!target) {
+        output.write("No session to resume.\n");
+        continue;
+      }
+      session = await loadSession(target);
+      output.write(`Resumed ${session.id}: ${session.title}\n`);
+      continue;
+    }
+    if (trimmed === "/new") {
+      session = await createSession(config, process.cwd());
+      output.write(`New session ${session.id}\n`);
       continue;
     }
     if (trimmed === "/config") {
@@ -220,6 +298,10 @@ Config: ${configPath()}
       const provider = requireProvider(trimmed.slice("/provider ".length));
       config.defaultProvider = provider;
       config.defaultModel = config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
+      session.provider = config.defaultProvider;
+      session.model = config.defaultModel;
+      session.thinkingMode = config.thinkingMode;
+      await saveSession(session);
       await saveConfig(config);
       output.write(`Provider set: ${provider}. Model: ${config.defaultModel}. Key: ${keyStatus(config, provider)}\n`);
       continue;
@@ -232,6 +314,8 @@ Config: ${configPath()}
       }
       config.defaultModel = selectedModel;
       config.providers[config.defaultProvider].defaultModel = selectedModel;
+      session.model = selectedModel;
+      await saveSession(session);
       await saveConfig(config);
       output.write(`Model set: ${config.defaultModel}\n`);
       continue;
@@ -243,6 +327,8 @@ Config: ${configPath()}
         continue;
       }
       config.thinkingMode = mode;
+      session.thinkingMode = mode;
+      await saveSession(session);
       await saveConfig(config);
       output.write(`Thinking mode set: ${mode}\n`);
       continue;
@@ -256,6 +342,55 @@ Config: ${configPath()}
       config.approvalMode = mode;
       await saveConfig(config);
       output.write(`Approval mode set: ${mode}\n`);
+      continue;
+    }
+    if (trimmed === "/memory show") {
+      output.write(`${await readMemory(process.cwd()) || "No memory."}\n`);
+      continue;
+    }
+    if (trimmed === "/memory clear") {
+      await clearMemory(process.cwd());
+      output.write("Memory cleared.\n");
+      continue;
+    }
+    if (trimmed.startsWith("/memory add ")) {
+      await addMemory(process.cwd(), trimmed.slice("/memory add ".length));
+      output.write("Memory added.\n");
+      continue;
+    }
+    if (trimmed === "/memory" || trimmed === "/memory add") {
+      const text = await promptLine("Memory: ");
+      if (text.trim()) {
+        await addMemory(process.cwd(), text);
+        output.write("Memory added.\n");
+      }
+      continue;
+    }
+    if (trimmed === "/todo list" || trimmed === "/todo") {
+      output.write(`${formatTodos(await readTodos(process.cwd()))}\n`);
+      continue;
+    }
+    if (trimmed === "/todo clear") {
+      await clearTodos(process.cwd());
+      output.write("Todos cleared.\n");
+      continue;
+    }
+    if (trimmed.startsWith("/todo add ")) {
+      const todo = await addTodo(process.cwd(), trimmed.slice("/todo add ".length));
+      output.write(`Todo added: ${todo.id}\n`);
+      continue;
+    }
+    if (trimmed.startsWith("/todo done ")) {
+      const todo = await completeTodo(process.cwd(), trimmed.slice("/todo done ".length).trim());
+      output.write(todo ? `Todo done: ${todo.id}\n` : "Todo not found.\n");
+      continue;
+    }
+    if (trimmed === "/todo add") {
+      const text = await promptLine("Todo: ");
+      if (text.trim()) {
+        const todo = await addTodo(process.cwd(), text);
+        output.write(`Todo added: ${todo.id}\n`);
+      }
       continue;
     }
     if (trimmed === "/key status") {
@@ -298,9 +433,40 @@ Config: ${configPath()}
       output.write(`Base URL set for ${provider}.\n`);
       continue;
     }
+    if (trimmed.startsWith("/plan ")) {
+      await runAsk(config, `Create a concrete implementation plan for this task. Read relevant files first if needed. Task: ${trimmed.slice("/plan ".length)}`);
+      continue;
+    }
+    if (trimmed === "/review" || trimmed.startsWith("/review ")) {
+      const focus = trimmed.slice("/review".length).trim();
+      await runAsk(config, `Review this repository or current git diff. Prioritize bugs, regressions, missing tests, and risky design issues. Focus: ${focus || "general code review"}`);
+      continue;
+    }
+    if (trimmed.startsWith("/fix ")) {
+      await runAsk(config, `Debug and fix this problem end to end. Read files, edit safely, and run relevant checks. Problem: ${trimmed.slice("/fix ".length)}`);
+      continue;
+    }
+    if (trimmed.startsWith("/explain ")) {
+      await runAsk(config, `Explain this using repository context. Read relevant files first if useful. Topic: ${trimmed.slice("/explain ".length)}`);
+      continue;
+    }
 
     try {
-      await runAsk(config, trimmed);
+      await ensureConfigured(config);
+      const prefix = await contextPrefix(process.cwd());
+      const fullPrompt = prefix ? `${prefix}\n\nUser request:\n${trimmed}` : trimmed;
+      const provider = createProvider(config, config.defaultProvider);
+      const agent = new EllaAgent(provider, config);
+      const result = await agent.run({
+        cwd: process.cwd(),
+        prompt: fullPrompt,
+        messages: session.messages,
+      });
+      appendPair(session, trimmed, result.messages);
+      session.provider = config.defaultProvider;
+      session.model = config.defaultModel;
+      session.thinkingMode = config.thinkingMode;
+      await saveSession(session);
     } catch (error) {
       output.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
@@ -415,6 +581,83 @@ async function main(): Promise<void> {
       case "commands":
         output.write(SLASH_COMMAND_HELP);
         return;
+      case "sessions":
+        output.write(`${formatSessionList(await listSessions())}\n`);
+        return;
+      case "resume": {
+        const target = args[1] || (await latestSession())?.id;
+        if (!target) throw new Error("No session to resume.");
+        await interactive(config, target);
+        return;
+      }
+      case "memory": {
+        const action = args[1] || "show";
+        if (action === "show") {
+          output.write(`${await readMemory(process.cwd()) || "No memory."}\n`);
+          return;
+        }
+        if (action === "add") {
+          const text = args.slice(2).join(" ").trim() || await promptLine("Memory: ");
+          if (!text.trim()) throw new Error("Missing memory text.");
+          await addMemory(process.cwd(), text);
+          output.write("Memory added.\n");
+          return;
+        }
+        if (action === "clear") {
+          await clearMemory(process.cwd());
+          output.write("Memory cleared.\n");
+          return;
+        }
+        throw new Error("Use: ella memory <show|add|clear>");
+      }
+      case "todo": {
+        const action = args[1] || "list";
+        if (action === "list") {
+          output.write(`${formatTodos(await readTodos(process.cwd()))}\n`);
+          return;
+        }
+        if (action === "add") {
+          const text = args.slice(2).join(" ").trim() || await promptLine("Todo: ");
+          if (!text.trim()) throw new Error("Missing todo text.");
+          const todo = await addTodo(process.cwd(), text);
+          output.write(`Todo added: ${todo.id}\n`);
+          return;
+        }
+        if (action === "done") {
+          const todo = await completeTodo(process.cwd(), args[2] || "");
+          output.write(todo ? `Todo done: ${todo.id}\n` : "Todo not found.\n");
+          return;
+        }
+        if (action === "clear") {
+          await clearTodos(process.cwd());
+          output.write("Todos cleared.\n");
+          return;
+        }
+        throw new Error("Use: ella todo <list|add|done|clear>");
+      }
+      case "plan": {
+        const task = args.slice(1).join(" ").trim();
+        if (!task) throw new Error("Missing task.");
+        await runAsk(config, `Create a concrete implementation plan for this task. Read relevant files first if needed. Task: ${task}`);
+        return;
+      }
+      case "review": {
+        const focus = args.slice(1).join(" ").trim();
+        await runAsk(config, `Review this repository or current git diff. Prioritize bugs, regressions, missing tests, and risky design issues. Focus: ${focus || "general code review"}`);
+        return;
+      }
+      case "fix": {
+        const problem = args.slice(1).join(" ").trim();
+        if (!problem) throw new Error("Missing problem.");
+        await runAsk(config, `Debug and fix this problem end to end. Read files, edit safely, and run relevant checks. Problem: ${problem}`);
+        return;
+      }
+      case "explain": {
+        const topic = args.slice(1).join(" ").trim();
+        if (!topic) throw new Error("Missing topic.");
+        await runAsk(config, `Explain this using repository context. Read relevant files first if useful. Topic: ${topic}`);
+        return;
+      }
       case "init": {
         const created = await initProject(process.cwd());
         output.write(created.length ? `Created:\n${created.map((item) => `- ${item}`).join("\n")}\n` : "Ella project already initialized.\n");

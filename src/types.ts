@@ -11,6 +11,26 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface SessionRecord {
+  id: string;
+  title: string;
+  cwd: string;
+  createdAt: string;
+  updatedAt: string;
+  provider: ProviderName;
+  model: string;
+  thinkingMode: ThinkingMode;
+  messages: ChatMessage[];
+}
+
+export interface TodoItem {
+  id: string;
+  text: string;
+  status: "pending" | "done";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProviderSettings {
   apiKey?: string;
   baseUrl?: string;
@@ -49,6 +69,7 @@ export interface ToolDefinition {
   name: string;
   description: string;
   risk: ToolRisk;
+  preview?(input: Record<string, unknown>, context: ToolContext): Promise<string>;
   run(input: Record<string, unknown>, context: ToolContext): Promise<string>;
 }
 
