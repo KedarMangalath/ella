@@ -4,6 +4,7 @@ import type { ChatMessage, EllaConfig, ModelProvider } from "./types.js";
 import { maxOutputTokensForThinking } from "./models.js";
 import { systemPrompt } from "./prompts.js";
 import { parseToolCalls, runToolCall } from "./tools.js";
+import { theme } from "./theme.js";
 
 export interface AgentRunOptions {
   cwd: string;
@@ -24,7 +25,7 @@ function visibleAssistantText(text: string): string {
 async function askApproval(reason: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
   try {
-    const answer = await rl.question(`${reason} [y/N] `);
+    const answer = await rl.question(`${theme.prompt(reason)} ${theme.muted("[y/N]")} `);
     return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
   } finally {
     rl.close();
@@ -69,13 +70,13 @@ export class EllaAgent {
 
       const toolResults: string[] = [];
       for (const call of calls) {
-        output.write(`\n[tool] ${call.name}\n`);
+        output.write(`\n${theme.tool("[tool]")} ${theme.accent(call.name)}\n`);
         const result = await runToolCall(call, {
           cwd: options.cwd,
           approvalMode: this.config.approvalMode,
           askApproval,
         });
-        output.write(`${result.slice(0, 1200)}${result.length > 1200 ? "\n[truncated]" : ""}\n`);
+        output.write(`${theme.muted(result.slice(0, 1200))}${result.length > 1200 ? `\n${theme.muted("[truncated]")}` : ""}\n`);
         toolResults.push(`<ella_tool_result name="${call.name}">\n${result}\n</ella_tool_result>`);
       }
 

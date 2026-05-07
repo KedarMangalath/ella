@@ -35,73 +35,47 @@ import {
   loadSession,
   saveSession,
 } from "./session.js";
+import { kv, slashCommandHelp, theme } from "./theme.js";
 
 const args = process.argv.slice(2);
 
-const SLASH_COMMAND_HELP = `Slash commands:
-/commands, /help               Show commands
-/exit, /quit                   Quit Ella
-/setup                         Run setup wizard
-/status                        Show active provider/model/settings
-/sessions                      List saved sessions
-/resume [session-id]           Resume saved session
-/new                           Start new session
-/config                        Show masked config
-/tools                         Show local tools
-/models [provider]             Show model catalog
-/provider <provider>           Switch provider
-/model <name-or-number>        Switch model for active provider
-/think <fast|balanced|deep|max>
-/approval <ask|auto-edit|full-auto|read-only>
-/key status                    Show key status
-/key set [provider]            Paste and save API key
-/key delete [provider]         Delete stored API key
-/memory show|add|clear         Project memory
-/todo list|add|done|clear      Project todo list
-/plan <task>                   Produce implementation plan
-/review [focus]                Review repo/diff for issues
-/fix <problem>                 Debug and fix problem
-/explain <topic>               Explain code/topic using repo context
-/base-url <provider> <url>     Set custom provider base URL
-`;
-
 function printHelp(): void {
-  output.write(`Ella CLI
+  output.write(`${theme.brand("Ella CLI")}
 
-Usage:
-  ella
-  ella ask <prompt>
-  ella setup
-  ella commands
-  ella sessions
-  ella resume [session-id]
-  ella memory <show|add|clear>
-  ella todo <list|add|done|clear>
-  ella plan <task>
-  ella review [focus]
-  ella fix <problem>
-  ella explain <topic>
-  ella init
-  ella models [provider]
-  ella tools
-  ella doctor
-  ella config show
-  ella config set-key <provider> [key]
-  ella config delete-key <provider>
-  ella config set-base-url <provider> <url>
-  ella config set-provider <provider>
-  ella config set-model <model>
-  ella config set-thinking <fast|balanced|deep|max>
-  ella config set-approval <ask|auto-edit|full-auto|read-only>
+${theme.header("Usage")}
+  ${theme.command("ella")}
+  ${theme.command("ella ask <prompt>")}
+  ${theme.command("ella setup")}
+  ${theme.command("ella commands")}
+  ${theme.command("ella sessions")}
+  ${theme.command("ella resume [session-id]")}
+  ${theme.command("ella memory <show|add|clear>")}
+  ${theme.command("ella todo <list|add|done|clear>")}
+  ${theme.command("ella plan <task>")}
+  ${theme.command("ella review [focus]")}
+  ${theme.command("ella fix <problem>")}
+  ${theme.command("ella explain <topic>")}
+  ${theme.command("ella init")}
+  ${theme.command("ella models [provider]")}
+  ${theme.command("ella tools")}
+  ${theme.command("ella doctor")}
+  ${theme.command("ella config show")}
+  ${theme.command("ella config set-key <provider> [key]")}
+  ${theme.command("ella config delete-key <provider>")}
+  ${theme.command("ella config set-base-url <provider> <url>")}
+  ${theme.command("ella config set-provider <provider>")}
+  ${theme.command("ella config set-model <model>")}
+  ${theme.command("ella config set-thinking <fast|balanced|deep|max>")}
+  ${theme.command("ella config set-approval <ask|auto-edit|full-auto|read-only>")}
 
-Providers: openai, anthropic, gemini, openrouter
+${theme.header("Providers")} ${theme.accent("openai, anthropic, gemini, openrouter")}
 `);
 }
 
 async function promptLine(question: string): Promise<string> {
   const rl = readline.createInterface({ input, output });
   try {
-    return await rl.question(question);
+    return await rl.question(theme.prompt(question));
   } finally {
     rl.close();
   }
@@ -141,10 +115,10 @@ function pickModel(provider: ProviderName, answer: string): string | null {
 }
 
 async function setupWizard(config: EllaConfig): Promise<void> {
-  output.write("\nElla setup\n");
-  output.write("Paste key here once. Ella remembers it in global config.\n\n");
+  output.write(`\n${theme.brand("Ella setup")}\n`);
+  output.write(`${theme.muted("Paste key here once. Ella remembers it in global config.")}\n\n`);
 
-  output.write("Providers:\n1. openai\n2. anthropic\n3. gemini\n4. openrouter\n");
+  output.write(`${theme.header("Providers")}\n${theme.command("1. openai")}\n${theme.command("2. anthropic")}\n${theme.command("3. gemini")}\n${theme.command("4. openrouter")}\n`);
   const providerAnswer = await promptLine(`Provider (${config.defaultProvider}): `);
   const providerByIndex: ProviderName[] = ["openai", "anthropic", "gemini", "openrouter"];
   const provider =
@@ -182,7 +156,7 @@ async function setupWizard(config: EllaConfig): Promise<void> {
   }
 
   await saveConfig(config);
-  output.write(`\nSaved. Active: ${config.defaultProvider}/${config.defaultModel}, thinking=${config.thinkingMode}, approval=${config.approvalMode}\n\n`);
+  output.write(`\n${theme.success("Saved.")} Active: ${theme.accent(`${config.defaultProvider}/${config.defaultModel}`)}, thinking=${theme.accent(config.thinkingMode)}, approval=${theme.accent(config.approvalMode)}\n\n`);
 }
 
 async function ensureConfigured(config: EllaConfig): Promise<void> {
@@ -232,9 +206,9 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
   session.thinkingMode = config.thinkingMode;
   await saveSession(session);
 
-  output.write(`Ella ${config.defaultProvider}/${config.defaultModel} thinking=${config.thinkingMode} approval=${config.approvalMode}\n`);
-  output.write(`Session ${session.id}: ${session.title}\n`);
-  output.write("Type /commands for commands, /exit to quit.\n\n");
+  output.write(`${theme.brand("Ella")} ${theme.accent(`${config.defaultProvider}/${config.defaultModel}`)} ${theme.muted(`thinking=${config.thinkingMode} approval=${config.approvalMode}`)}\n`);
+  output.write(`${kv("Session", `${session.id} (${session.title})`)}\n`);
+  output.write(`${theme.muted("Type /commands for commands, /exit to quit.")}\n\n`);
 
   while (true) {
     const line = await promptLine("ella> ");
@@ -242,7 +216,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
     if (!trimmed) continue;
     if (trimmed === "/exit" || trimmed === "/quit") return;
     if (trimmed === "/help" || trimmed === "/commands") {
-      output.write(SLASH_COMMAND_HELP);
+      output.write(slashCommandHelp());
       continue;
     }
     if (trimmed === "/setup") {
@@ -250,13 +224,13 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
       continue;
     }
     if (trimmed === "/status") {
-      output.write(`Provider: ${config.defaultProvider}
-Model: ${config.defaultModel}
-Thinking: ${config.thinkingMode}
-Approval: ${config.approvalMode}
-Key: ${keyStatus(config, config.defaultProvider)}
-Session: ${session.id} (${session.title})
-Config: ${configPath()}
+      output.write(`${kv("Provider", config.defaultProvider)}
+${kv("Model", config.defaultModel)}
+${kv("Thinking", config.thinkingMode)}
+${kv("Approval", config.approvalMode)}
+${kv("Key", keyStatus(config, config.defaultProvider))}
+${kv("Session", `${session.id} (${session.title})`)}
+${kv("Config", configPath())}
 `);
       continue;
     }
@@ -272,12 +246,12 @@ Config: ${configPath()}
         continue;
       }
       session = await loadSession(target);
-      output.write(`Resumed ${session.id}: ${session.title}\n`);
+      output.write(`${theme.success("Resumed")} ${theme.accent(session.id)}: ${session.title}\n`);
       continue;
     }
     if (trimmed === "/new") {
       session = await createSession(config, process.cwd());
-      output.write(`New session ${session.id}\n`);
+      output.write(`${theme.success("New session")} ${theme.accent(session.id)}\n`);
       continue;
     }
     if (trimmed === "/config") {
@@ -303,7 +277,7 @@ Config: ${configPath()}
       session.thinkingMode = config.thinkingMode;
       await saveSession(session);
       await saveConfig(config);
-      output.write(`Provider set: ${provider}. Model: ${config.defaultModel}. Key: ${keyStatus(config, provider)}\n`);
+      output.write(`${theme.success("Provider set:")} ${theme.accent(provider)}. Model: ${theme.accent(config.defaultModel)}. Key: ${theme.accent(keyStatus(config, provider))}\n`);
       continue;
     }
     if (trimmed.startsWith("/model ")) {
@@ -317,7 +291,7 @@ Config: ${configPath()}
       session.model = selectedModel;
       await saveSession(session);
       await saveConfig(config);
-      output.write(`Model set: ${config.defaultModel}\n`);
+      output.write(`${theme.success("Model set:")} ${theme.accent(config.defaultModel)}\n`);
       continue;
     }
     if (trimmed.startsWith("/think ")) {
@@ -330,7 +304,7 @@ Config: ${configPath()}
       session.thinkingMode = mode;
       await saveSession(session);
       await saveConfig(config);
-      output.write(`Thinking mode set: ${mode}\n`);
+      output.write(`${theme.success("Thinking mode set:")} ${theme.accent(mode)}\n`);
       continue;
     }
     if (trimmed.startsWith("/approval ")) {
@@ -341,7 +315,7 @@ Config: ${configPath()}
       }
       config.approvalMode = mode;
       await saveConfig(config);
-      output.write(`Approval mode set: ${mode}\n`);
+      output.write(`${theme.success("Approval mode set:")} ${theme.accent(mode)}\n`);
       continue;
     }
     if (trimmed === "/memory show") {
@@ -350,19 +324,19 @@ Config: ${configPath()}
     }
     if (trimmed === "/memory clear") {
       await clearMemory(process.cwd());
-      output.write("Memory cleared.\n");
+      output.write(`${theme.success("Memory cleared.")}\n`);
       continue;
     }
     if (trimmed.startsWith("/memory add ")) {
       await addMemory(process.cwd(), trimmed.slice("/memory add ".length));
-      output.write("Memory added.\n");
+      output.write(`${theme.success("Memory added.")}\n`);
       continue;
     }
     if (trimmed === "/memory" || trimmed === "/memory add") {
       const text = await promptLine("Memory: ");
       if (text.trim()) {
         await addMemory(process.cwd(), text);
-        output.write("Memory added.\n");
+        output.write(`${theme.success("Memory added.")}\n`);
       }
       continue;
     }
@@ -372,30 +346,30 @@ Config: ${configPath()}
     }
     if (trimmed === "/todo clear") {
       await clearTodos(process.cwd());
-      output.write("Todos cleared.\n");
+      output.write(`${theme.success("Todos cleared.")}\n`);
       continue;
     }
     if (trimmed.startsWith("/todo add ")) {
       const todo = await addTodo(process.cwd(), trimmed.slice("/todo add ".length));
-      output.write(`Todo added: ${todo.id}\n`);
+      output.write(`${theme.success("Todo added:")} ${theme.accent(todo.id)}\n`);
       continue;
     }
     if (trimmed.startsWith("/todo done ")) {
       const todo = await completeTodo(process.cwd(), trimmed.slice("/todo done ".length).trim());
-      output.write(todo ? `Todo done: ${todo.id}\n` : "Todo not found.\n");
+      output.write(todo ? `${theme.success("Todo done:")} ${theme.accent(todo.id)}\n` : `${theme.warning("Todo not found.")}\n`);
       continue;
     }
     if (trimmed === "/todo add") {
       const text = await promptLine("Todo: ");
       if (text.trim()) {
         const todo = await addTodo(process.cwd(), text);
-        output.write(`Todo added: ${todo.id}\n`);
+        output.write(`${theme.success("Todo added:")} ${theme.accent(todo.id)}\n`);
       }
       continue;
     }
     if (trimmed === "/key status") {
       for (const provider of Object.keys(config.providers) as ProviderName[]) {
-        output.write(`${provider}: ${keyStatus(config, provider)}\n`);
+        output.write(`${kv(provider, keyStatus(config, provider))}\n`);
       }
       continue;
     }
@@ -404,12 +378,12 @@ Config: ${configPath()}
       const provider = requested ? requireProvider(requested) : config.defaultProvider;
       const key = await promptLine(`Paste API key for ${provider}: `);
       if (!key.trim()) {
-        output.write("No key saved.\n");
+        output.write(`${theme.warning("No key saved.")}\n`);
         continue;
       }
       config.providers[provider] = { ...config.providers[provider], apiKey: key.trim() };
       await saveConfig(config);
-      output.write(`Saved key for ${provider}.\n`);
+      output.write(`${theme.success("Saved key for")} ${theme.accent(provider)}.\n`);
       continue;
     }
     if (trimmed === "/key delete" || trimmed.startsWith("/key delete ")) {
@@ -417,7 +391,7 @@ Config: ${configPath()}
       const provider = requested ? requireProvider(requested) : config.defaultProvider;
       delete config.providers[provider].apiKey;
       await saveConfig(config);
-      output.write(`Deleted stored key for ${provider}. Env key status: ${envKeyForProvider(provider) ? "present" : "missing"}.\n`);
+      output.write(`${theme.success("Deleted stored key for")} ${theme.accent(provider)}. Env key status: ${theme.accent(envKeyForProvider(provider) ? "present" : "missing")}.\n`);
       continue;
     }
     if (trimmed.startsWith("/base-url ")) {
@@ -425,12 +399,12 @@ Config: ${configPath()}
       const provider = requireProvider(parts[0] || "");
       const url = parts.slice(1).join(" ").trim();
       if (!url) {
-        output.write("Use: /base-url <provider> <url>\n");
+        output.write(`${theme.warning("Use:")} ${theme.command("/base-url <provider> <url>")}\n`);
         continue;
       }
       config.providers[provider] = { ...config.providers[provider], baseUrl: url };
       await saveConfig(config);
-      output.write(`Base URL set for ${provider}.\n`);
+      output.write(`${theme.success("Base URL set for")} ${theme.accent(provider)}.\n`);
       continue;
     }
     if (trimmed.startsWith("/plan ")) {
@@ -468,7 +442,7 @@ Config: ${configPath()}
       session.thinkingMode = config.thinkingMode;
       await saveSession(session);
     } catch (error) {
-      output.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+      output.write(`${theme.danger("Error:")} ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
 }
@@ -479,7 +453,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
     case "show":
     case undefined:
       output.write(`${JSON.stringify(maskedConfig(config), null, 2)}\n`);
-      output.write(`Config: ${configPath()}\n`);
+      output.write(`${kv("Config", configPath())}\n`);
       return;
     case "set-key": {
       const provider = requireProvider(rest[0] || "");
@@ -489,7 +463,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
         config.providers[provider].defaultModel = DEFAULT_MODELS[provider];
       }
       await saveConfig(config);
-      output.write(`Saved key for ${provider}.\n`);
+      output.write(`${theme.success("Saved key for")} ${theme.accent(provider)}.\n`);
       return;
     }
     case "delete-key":
@@ -498,12 +472,12 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
       const provider = requireProvider(rest[0] || "");
       delete config.providers[provider].apiKey;
       await saveConfig(config);
-      output.write(`Deleted stored key for ${provider}. Env key status: ${envKeyForProvider(provider) ? "present" : "missing"}.\n`);
+      output.write(`${theme.success("Deleted stored key for")} ${theme.accent(provider)}. Env key status: ${theme.accent(envKeyForProvider(provider) ? "present" : "missing")}.\n`);
       return;
     }
     case "key-status": {
       for (const provider of Object.keys(config.providers) as ProviderName[]) {
-        output.write(`${provider}: ${keyStatus(config, provider)}\n`);
+        output.write(`${kv(provider, keyStatus(config, provider))}\n`);
       }
       return;
     }
@@ -513,7 +487,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
       if (!url) throw new Error("Missing base URL.");
       config.providers[provider] = { ...config.providers[provider], baseUrl: url };
       await saveConfig(config);
-      output.write(`Base URL set for ${provider}.\n`);
+      output.write(`${theme.success("Base URL set for")} ${theme.accent(provider)}.\n`);
       return;
     }
     case "set-provider": {
@@ -521,7 +495,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
       config.defaultProvider = provider;
       config.defaultModel = config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
       await saveConfig(config);
-      output.write(`Provider set: ${provider}. Model set: ${config.defaultModel}.\n`);
+      output.write(`${theme.success("Provider set:")} ${theme.accent(provider)}. Model set: ${theme.accent(config.defaultModel)}.\n`);
       return;
     }
     case "set-model": {
@@ -530,7 +504,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
       config.defaultModel = model;
       config.providers[config.defaultProvider].defaultModel = model;
       await saveConfig(config);
-      output.write(`Model set: ${model}.\n`);
+      output.write(`${theme.success("Model set:")} ${theme.accent(model)}.\n`);
       return;
     }
     case "set-thinking": {
@@ -538,7 +512,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
       if (!mode) throw new Error("Use thinking mode: fast, balanced, deep, max.");
       config.thinkingMode = mode;
       await saveConfig(config);
-      output.write(`Thinking mode set: ${mode}.\n`);
+      output.write(`${theme.success("Thinking mode set:")} ${theme.accent(mode)}.\n`);
       return;
     }
     case "set-approval": {
@@ -546,7 +520,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
       if (!mode) throw new Error("Use approval mode: ask, auto-edit, full-auto, read-only.");
       config.approvalMode = mode;
       await saveConfig(config);
-      output.write(`Approval mode set: ${mode}.\n`);
+      output.write(`${theme.success("Approval mode set:")} ${theme.accent(mode)}.\n`);
       return;
     }
     default:
@@ -579,7 +553,7 @@ async function main(): Promise<void> {
         await setupWizard(config);
         return;
       case "commands":
-        output.write(SLASH_COMMAND_HELP);
+        output.write(slashCommandHelp());
         return;
       case "sessions":
         output.write(`${formatSessionList(await listSessions())}\n`);
@@ -600,12 +574,12 @@ async function main(): Promise<void> {
           const text = args.slice(2).join(" ").trim() || await promptLine("Memory: ");
           if (!text.trim()) throw new Error("Missing memory text.");
           await addMemory(process.cwd(), text);
-          output.write("Memory added.\n");
+          output.write(`${theme.success("Memory added.")}\n`);
           return;
         }
         if (action === "clear") {
           await clearMemory(process.cwd());
-          output.write("Memory cleared.\n");
+          output.write(`${theme.success("Memory cleared.")}\n`);
           return;
         }
         throw new Error("Use: ella memory <show|add|clear>");
@@ -620,17 +594,17 @@ async function main(): Promise<void> {
           const text = args.slice(2).join(" ").trim() || await promptLine("Todo: ");
           if (!text.trim()) throw new Error("Missing todo text.");
           const todo = await addTodo(process.cwd(), text);
-          output.write(`Todo added: ${todo.id}\n`);
+          output.write(`${theme.success("Todo added:")} ${theme.accent(todo.id)}\n`);
           return;
         }
         if (action === "done") {
           const todo = await completeTodo(process.cwd(), args[2] || "");
-          output.write(todo ? `Todo done: ${todo.id}\n` : "Todo not found.\n");
+          output.write(todo ? `${theme.success("Todo done:")} ${theme.accent(todo.id)}\n` : `${theme.warning("Todo not found.")}\n`);
           return;
         }
         if (action === "clear") {
           await clearTodos(process.cwd());
-          output.write("Todos cleared.\n");
+          output.write(`${theme.success("Todos cleared.")}\n`);
           return;
         }
         throw new Error("Use: ella todo <list|add|done|clear>");
@@ -675,13 +649,13 @@ async function main(): Promise<void> {
         output.write(`${toolHelp()}\n`);
         return;
       case "doctor":
-        output.write(`Node: ${process.version}\n`);
-        output.write(`CWD: ${process.cwd()}\n`);
-        output.write(`Config: ${configPath()}\n`);
-        output.write(`Provider: ${config.defaultProvider}\n`);
-        output.write(`Model: ${config.defaultModel}\n`);
-        output.write(`Thinking: ${config.thinkingMode}\n`);
-        output.write(`Approval: ${config.approvalMode}\n`);
+        output.write(`${kv("Node", process.version)}\n`);
+        output.write(`${kv("CWD", process.cwd())}\n`);
+        output.write(`${kv("Config", configPath())}\n`);
+        output.write(`${kv("Provider", config.defaultProvider)}\n`);
+        output.write(`${kv("Model", config.defaultModel)}\n`);
+        output.write(`${kv("Thinking", config.thinkingMode)}\n`);
+        output.write(`${kv("Approval", config.approvalMode)}\n`);
         return;
       case "config":
         await handleConfig(config, args.slice(1));
@@ -691,7 +665,7 @@ async function main(): Promise<void> {
         throw new Error(`Unknown command: ${command}`);
     }
   } catch (error) {
-    output.write(`Error: ${error instanceof Error ? error.message : String(error)}\n`);
+    output.write(`${theme.danger("Error:")} ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
   }
 }

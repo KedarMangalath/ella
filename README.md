@@ -20,6 +20,7 @@ Ella is early MVP software. The current build has the product spine: CLI command
 - Claude Code/OpenCode/Gemini CLI-style slash commands
 - Project memory and todo list
 - Agent shortcuts for planning, review, fixing, and explanation
+- Purple-mauve terminal palette with `NO_COLOR` support
 - Local coding tools for reading, searching, editing, shell commands, and git inspection
 - Permission modes with edit/shell previews for safer operation
 - Project initialization with `ELLA.md`
@@ -132,6 +133,22 @@ node dist/cli.js config set-provider <provider>
 node dist/cli.js config set-model <model>
 node dist/cli.js config set-thinking <fast|balanced|deep|max>
 node dist/cli.js config set-approval <ask|auto-edit|full-auto|read-only>
+```
+
+## Terminal Theme
+
+Ella uses a purple-mauve ANSI palette for prompts, headers, commands, status labels, success messages, warnings, errors, and tool activity.
+
+Disable color:
+
+```bash
+NO_COLOR=1 node dist/cli.js
+```
+
+Force color in environments that do not expose a TTY:
+
+```bash
+FORCE_COLOR=1 node dist/cli.js commands
 ```
 
 Providers:
