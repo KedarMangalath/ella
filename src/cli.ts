@@ -36,60 +36,21 @@ import {
   loadSession,
   saveSession,
 } from "./session.js";
-import { kv, slashCommandHelp, theme } from "./theme.js";
+import { kv, theme } from "./theme.js";
 import { ellaStill } from "./animation.js";
 import { redoLast, undoLast, undoStatus } from "./undo.js";
 import { buildGraph, graphImpact, graphSearch, graphStats } from "./graph.js";
 import { formatSubagents, swarmPrompt } from "./subagents.js";
 import type { SessionRecord } from "./types.js";
+import { formatCliHelp, formatSlashCommandHelp } from "./commands/help.js";
+import { renderEllaLogo } from "./logo.js";
+import { suggestTopLevelCommand } from "./commands/registry.js";
+import { handleIntegrationCommand } from "./integrations.js";
 
 const args = process.argv.slice(2);
 
 function printHelp(): void {
-  output.write(`${theme.brand("Ella CLI")}
-
-${theme.header("Usage")}
-  ${theme.command("ella")}
-  ${theme.command("ella ask <prompt>")}
-  ${theme.command("ella setup")}
-  ${theme.command("ella commands")}
-  ${theme.command("ella status")}
-  ${theme.command("ella sessions")}
-  ${theme.command("ella continue [prompt]")}
-  ${theme.command("ella resume [session-id]")}
-  ${theme.command("ella key <status|set|delete> [provider]")}
-  ${theme.command("ella provider <provider>")}
-  ${theme.command("ella model <name-or-number>")}
-  ${theme.command("ella think <fast|balanced|deep|max>")}
-  ${theme.command("ella approval <ask|auto-edit|full-auto|read-only>")}
-  ${theme.command("ella base-url <provider> <url>")}
-  ${theme.command("ella memory <show|add|clear>")}
-  ${theme.command("ella todo <list|add|done|clear>")}
-  ${theme.command("ella undo|redo|history")}
-  ${theme.command("ella graph <build|stats|search|impact>")}
-  ${theme.command("ella agents")}
-  ${theme.command("ella swarm <task>")}
-  ${theme.command("ella accessibility <show|set>")}
-  ${theme.command("ella plan <task>")}
-  ${theme.command("ella review [focus]")}
-  ${theme.command("ella fix <problem>")}
-  ${theme.command("ella explain <topic>")}
-  ${theme.command("ella init")}
-  ${theme.command("ella models [provider]")}
-  ${theme.command("ella tools")}
-  ${theme.command("ella doctor")}
-  ${theme.command("ella config show")}
-  ${theme.command("ella config set-key <provider> [key]")}
-  ${theme.command("ella config delete-key <provider>")}
-  ${theme.command("ella config set-base-url <provider> <url>")}
-  ${theme.command("ella config set-provider <provider>")}
-  ${theme.command("ella config set-model <model>")}
-  ${theme.command("ella config set-thinking <fast|balanced|deep|max>")}
-  ${theme.command("ella config set-approval <ask|auto-edit|full-auto|read-only>")}
-
-${theme.header("Providers")} ${theme.accent("openai, anthropic, gemini, openrouter")}
-${theme.muted("Tip: you can also type plain English, e.g. ella fix the failing tests")}
-`);
+  output.write(formatCliHelp());
 }
 
 async function promptLine(question: string): Promise<string> {
@@ -112,6 +73,19 @@ function requireProvider(value: string): ProviderName {
   const provider = providerFromString(value);
   if (!provider) throw new Error(`Unknown provider: ${value}`);
   return provider;
+}
+
+function parseSlashArgs(trimmed: string, name: string): string[] {
+  return trimmed.slice(name.length + 1).trim().split(/\s+/).filter(Boolean);
+}
+
+function integrationSlashKind(trimmed: string): string | null {
+  const [first] = trimmed.split(/\s+/, 1);
+  const command = first?.slice(1).toLowerCase();
+  if (["mcp", "skills", "skill", "hooks", "hook", "extensions", "extension"].includes(command || "")) {
+    return command || null;
+  }
+  return null;
 }
 
 function isInteractiveTerminal(): boolean {
@@ -173,6 +147,7 @@ function nextSteps(config: EllaConfig): string {
 }
 
 async function doctor(config: EllaConfig): Promise<void> {
+  output.write(`${renderEllaLogo("doctor")}\n\n`);
   output.write(`${theme.header("Ella Doctor")}\n`);
   output.write(`${statusText(config)}\n`);
   output.write(`${kv("Node", process.version)}\n`);
@@ -183,7 +158,7 @@ async function doctor(config: EllaConfig): Promise<void> {
 }
 
 async function setupWizard(config: EllaConfig): Promise<void> {
-  output.write(`\n${ellaStill("setup")}\n`);
+  output.write(`\n${renderEllaLogo("setup")}\n\n${ellaStill("setup")}\n`);
   output.write(`${theme.brand("Ella setup")}\n`);
   output.write(`${theme.muted("Paste key here once. Ella remembers it in global config.")}\n\n`);
 
@@ -294,7 +269,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
   session.thinkingMode = config.thinkingMode;
   await saveSession(session);
 
-  output.write(`${ellaStill("ready")}\n`);
+  output.write(`${renderEllaLogo("ready")}\n\n${ellaStill("ready")}\n`);
   output.write(`${theme.brand("Ella")} ${theme.accent(`${config.defaultProvider}/${config.defaultModel}`)} ${theme.muted(`thinking=${config.thinkingMode} approval=${config.approvalMode}`)}\n`);
   output.write(`${kv("Session", `${session.id} (${session.title})`)}\n`);
   output.write(`${theme.muted("Type naturally, or use /commands. /exit quits.")}\n`);
@@ -306,7 +281,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
     if (!trimmed) continue;
     if (trimmed === "/exit" || trimmed === "/quit") return;
     if (trimmed === "/help" || trimmed === "/commands") {
-      output.write(slashCommandHelp());
+      output.write(formatSlashCommandHelp());
       continue;
     }
     if (trimmed === "/setup") {
@@ -359,6 +334,13 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
     if (trimmed === "/tools") {
       output.write(`${toolHelp()}\n`);
       continue;
+    }
+    {
+      const integrationKind = integrationSlashKind(trimmed);
+      if (integrationKind) {
+        output.write(`${await handleIntegrationCommand(integrationKind, parseSlashArgs(trimmed, integrationKind))}\n`);
+        continue;
+      }
     }
     if (trimmed === "/models" || trimmed.startsWith("/models ")) {
       const requested = trimmed.slice("/models".length).trim();
@@ -729,7 +711,7 @@ async function main(): Promise<void> {
         await setupWizard(config);
         return;
       case "commands":
-        output.write(slashCommandHelp());
+        output.write(formatSlashCommandHelp());
         return;
       case "status":
         output.write(`${statusText(config)}\n${nextSteps(config)}\n`);
@@ -949,6 +931,15 @@ async function main(): Promise<void> {
       case "tools":
         output.write(`${toolHelp()}\n`);
         return;
+      case "mcp":
+      case "skills":
+      case "skill":
+      case "hooks":
+      case "hook":
+      case "extensions":
+      case "extension":
+        output.write(`${await handleIntegrationCommand(command, args.slice(1))}\n`);
+        return;
       case "doctor":
         await doctor(config);
         return;
@@ -956,6 +947,12 @@ async function main(): Promise<void> {
         await handleConfig(config, args.slice(1));
         return;
       default:
+        if (args.length === 1) {
+          const suggestion = suggestTopLevelCommand(command || "");
+          if (suggestion) {
+            throw new Error(`Unknown command: ${command}. Did you mean ${theme.command(`ella ${suggestion}`)}?`);
+          }
+        }
         await runAsk(config, await promptFromArgs(0));
         return;
     }

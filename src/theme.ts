@@ -50,10 +50,6 @@ function style(code: string, text: string): string {
   return `${esc(code)}${text}${esc("0")}`;
 }
 
-function line(command: string, description: string): string {
-  return `${theme.command(command.padEnd(32))} ${theme.muted(description)}`;
-}
-
 export const theme = {
   palette,
   enabled: colorEnabled,
@@ -73,41 +69,6 @@ export const theme = {
   tool: (text: string) => theme.bold(paint(activePalette().mauve, text)),
   code: (text: string) => paint(activePalette().lavender, text),
 };
-
-export function slashCommandHelp(): string {
-  return `${theme.header("Slash commands")}
-${line("/commands, /help", "Show commands")}
-${line("/exit, /quit", "Quit Ella")}
-${line("/setup", "Run setup wizard")}
-${line("/status", "Show active provider/model/settings")}
-${line("/sessions", "List saved sessions")}
-${line("/continue [prompt]", "Continue latest session")}
-${line("/resume [session-id]", "Resume saved session")}
-${line("/new", "Start new session")}
-${line("/config", "Show masked config")}
-${line("/tools", "Show local tools")}
-${line("/models [provider]", "Show model catalog")}
-${line("/provider <provider>", "Switch provider")}
-${line("/model <name-or-number>", "Switch model for active provider")}
-${line("/think <fast|balanced|deep|max>", "Set thinking mode")}
-${line("/approval <mode>", "Set approval mode")}
-${line("/key status", "Show key status")}
-${line("/key set [provider]", "Paste and save API key")}
-${line("/key delete [provider]", "Delete stored API key")}
-${line("/memory show|add|clear", "Project memory")}
-${line("/todo list|add|done|clear", "Project todo list")}
-${line("/undo|/redo|/history", "Edit history")}
-${line("/graph build|stats|search|impact", "Repo graph")}
-${line("/agents", "List subagents")}
-${line("/swarm <task>", "Run swarm workflow")}
-${line("/accessibility", "Show accessibility settings")}
-${line("/plan <task>", "Produce implementation plan")}
-${line("/review [focus]", "Review repo/diff for issues")}
-${line("/fix <problem>", "Debug and fix problem")}
-${line("/explain <topic>", "Explain code/topic using repo context")}
-${line("/base-url <provider> <url>", "Set custom provider base URL")}
-`;
-}
 
 export function kv(label: string, value: string): string {
   return `${theme.label(`${label}:`)} ${theme.value(value)}`;

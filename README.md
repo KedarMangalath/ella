@@ -17,15 +17,18 @@ Ella is early sprint software with the main product spine in place: first-run se
 - Interactive terminal chat
 - Non-interactive `ella ask` mode, piped input, and plain-English top-level prompts
 - Persistent session history, saved one-shot runs, and real continuation
+- Central command registry for clean CLI help and slash commands
 - Claude Code/OpenCode/Gemini CLI-style slash commands
 - Project memory and todo list
 - Agent shortcuts for planning, review, fixing, and explanation
 - Purple-mauve terminal palette with `NO_COLOR` support
 - Animated line-based Ella character during startup, thinking, and tool execution
+- Proper responsive Ella ASCII wordmark
 - Accessibility settings for color, motion, contrast, and screen-reader-friendly mode
 - Undo/redo for Ella file edits
 - Lightweight repository graph for symbol/import/path search and impact checks
 - Subagent profiles and swarm workflow prompts
+- MCP, skills, hooks, and extensions registry commands
 - Local coding tools for reading, searching, editing, shell commands, and git inspection
 - Permission modes with edit/shell previews for safer operation
 - Project initialization with `ELLA.md`
@@ -160,6 +163,12 @@ node dist/cli.js graph build
 node dist/cli.js graph stats
 node dist/cli.js graph search "EllaAgent"
 node dist/cli.js graph impact "src/tools.ts"
+node dist/cli.js mcp list
+node dist/cli.js mcp add local "node server.js"
+node dist/cli.js skills list
+node dist/cli.js skills install reviewer ./skills/reviewer
+node dist/cli.js hooks add prebuild "npm run check"
+node dist/cli.js extensions install sample ./extension
 node dist/cli.js agents
 node dist/cli.js swarm "Add MCP support"
 git diff | node dist/cli.js review
@@ -251,6 +260,10 @@ Inside interactive mode:
 /redo
 /history
 /graph build|stats|search|impact
+/mcp <list|add|remove|enable|disable>
+/skills <list|install|link|uninstall|enable|disable>
+/hooks <list|add|remove|enable|disable>
+/extensions <list|install|link|uninstall|enable|disable>
 /agents
 /swarm <task>
 /accessibility <setting> <on|off>
@@ -394,6 +407,28 @@ node dist/cli.js swarm "Implement streaming output"
 
 The swarm command asks Ella to coordinate the profiles through plan, context, changes, validation, risks, and next steps.
 
+## MCP, Skills, Hooks, Extensions
+
+Ella has Gemini CLI-style management commands for local integration entries. They are stored in `~/.ella/integrations.json`.
+
+```bash
+node dist/cli.js mcp list
+node dist/cli.js mcp add local "node server.js"
+node dist/cli.js mcp disable local
+node dist/cli.js skills install reviewer ./skills/reviewer
+node dist/cli.js hooks add prebuild "npm run check"
+node dist/cli.js extensions install sample ./extension
+```
+
+Inside interactive mode:
+
+```text
+/mcp list
+/skills list
+/hooks list
+/extensions list
+```
+
 ## Local Tools
 
 Ella exposes tools to the model using XML-like tool blocks:
@@ -440,6 +475,7 @@ This creates:
 
 - Streaming model output
 - MCP client support
+- Execute configured hooks and extensions
 - Project memory and compaction
 - Safer patch previews
 - Test/build auto-repair loop
