@@ -59,6 +59,8 @@ npm run build
 npm run install:global
 ```
 
+On Windows, this also removes npm's generated `ella.ps1` shim so PowerShell can resolve the working `ella.cmd` command when script execution is disabled.
+
 Run locally without linking:
 
 ```bash
