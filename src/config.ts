@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { ApprovalMode, EllaConfig, ProviderName } from "./types.js";
 import { DEFAULT_MODELS } from "./models.js";
+import { allAuth, setApiKey } from "./auth.js";
 
 const CONFIG_VERSION = 1;
 
@@ -36,11 +37,12 @@ export function defaultConfig(): EllaConfig {
 }
 
 export async function loadConfig(): Promise<EllaConfig> {
+  const base = defaultConfig();
   try {
     const raw = await readFile(configPath(), "utf8");
     const parsed = JSON.parse(raw) as Partial<EllaConfig> & { version?: number };
-    const base = defaultConfig();
-    return {
+    const auth = await allAuth();
+    const config = {
       ...base,
       ...parsed,
       accessibility: {
@@ -52,16 +54,36 @@ export async function loadConfig(): Promise<EllaConfig> {
         ...(parsed.providers || {}),
       },
     };
+    for (const provider of Object.keys(config.providers) as ProviderName[]) {
+      const storedAuth = auth[provider];
+      if (storedAuth?.type === "api") {
+        config.providers[provider] = { ...config.providers[provider], apiKey: storedAuth.key };
+      }
+    }
+    return config;
   } catch {
-    return defaultConfig();
+    const auth = await allAuth();
+    for (const provider of Object.keys(base.providers) as ProviderName[]) {
+      const storedAuth = auth[provider];
+      if (storedAuth?.type === "api") {
+        base.providers[provider] = { ...base.providers[provider], apiKey: storedAuth.key };
+      }
+    }
+    return base;
   }
 }
 
 export async function saveConfig(config: EllaConfig): Promise<void> {
   await mkdir(ellaHome(), { recursive: true });
+  const sanitized = structuredClone(config);
+  for (const provider of Object.keys(sanitized.providers) as ProviderName[]) {
+    const key = sanitized.providers[provider].apiKey;
+    if (key) await setApiKey(provider, key);
+    delete sanitized.providers[provider].apiKey;
+  }
   const payload = {
     version: CONFIG_VERSION,
-    ...config,
+    ...sanitized,
   };
   await writeFile(configPath(), JSON.stringify(payload, null, 2), { mode: 0o600 });
 }

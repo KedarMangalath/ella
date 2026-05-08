@@ -6,7 +6,10 @@ Ella includes code and structural adaptations from local open-source projects in
 
 - Source: `../Agentic/opencode`
 - License: MIT
-- Used/adapted: CLI logo module shape from `packages/opencode/src/cli/logo.ts`.
+- Used/adapted:
+  - CLI logo module shape from `packages/opencode/src/cli/logo.ts`
+  - Auth-store pattern from `packages/opencode/src/auth/index.ts`
+  - Provider/model listing flow from `packages/opencode/src/cli/cmd/models.ts`
 
 MIT license text is available in `../Agentic/opencode/LICENSE`.
 

@@ -46,6 +46,7 @@ import { formatCliHelp, formatSlashCommandHelp } from "./commands/help.js";
 import { renderEllaLogo } from "./logo.js";
 import { suggestTopLevelCommand } from "./commands/registry.js";
 import { handleIntegrationCommand } from "./integrations.js";
+import { authPath, removeAuth, setApiKey } from "./auth.js";
 
 const args = process.argv.slice(2);
 
@@ -101,6 +102,14 @@ function keyStatus(config: EllaConfig, provider: ProviderName): string {
   return "missing";
 }
 
+function providerList(): ProviderName[] {
+  return ["openai", "anthropic", "gemini", "openrouter"];
+}
+
+function renderProviders(): string {
+  return `${providerList().map((provider, index) => `${index + 1}. ${provider}`).join("\n")}\n`;
+}
+
 function renderModels(provider: ProviderName): string {
   return `${provider}:\n${MODEL_CATALOG[provider].map((model, index) => `${index + 1}. ${model}`).join("\n")}\n`;
 }
@@ -113,6 +122,35 @@ function pickModel(provider: ProviderName, answer: string): string | null {
     return MODEL_CATALOG[provider][asIndex - 1] ?? null;
   }
   return trimmed;
+}
+
+async function chooseProvider(config: EllaConfig, answer?: string): Promise<ProviderName> {
+  const raw = answer?.trim();
+  if (raw) {
+    const byIndex = providerList()[Number(raw) - 1];
+    return byIndex || requireProvider(raw);
+  }
+  if (!isInteractiveTerminal()) return config.defaultProvider;
+  output.write(`${theme.header("Providers")}\n${providerList().map((provider, index) => theme.command(`${index + 1}. ${provider}`)).join("\n")}\n`);
+  const selected = await promptLine(`Provider (${config.defaultProvider}): `);
+  return selected.trim() ? chooseProvider(config, selected) : config.defaultProvider;
+}
+
+async function chooseModel(config: EllaConfig, provider: ProviderName, answer?: string): Promise<string> {
+  const current = config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
+  const raw = answer?.trim();
+  if (raw) return pickModel(provider, raw) || current;
+  output.write(`\n${renderModels(provider)}`);
+  if (!isInteractiveTerminal()) return current;
+  const selected = await promptLine(`Model name or number (${current}): `);
+  return selected.trim() ? chooseModel(config, provider, selected) : current;
+}
+
+function applyProviderModel(config: EllaConfig, provider: ProviderName, model?: string): void {
+  config.defaultProvider = provider;
+  const selectedModel = model || config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
+  config.defaultModel = selectedModel;
+  config.providers[provider].defaultModel = selectedModel;
 }
 
 async function readPipedInput(): Promise<string> {
@@ -136,7 +174,8 @@ ${kv("Model", config.defaultModel)}
 ${kv("Thinking", config.thinkingMode)}
 ${kv("Approval", config.approvalMode)}
 ${kv("Key", keyStatus(config, config.defaultProvider))}
-${kv("Config", configPath())}`;
+${kv("Config", configPath())}
+${kv("Auth", authPath())}`;
 }
 
 function nextSteps(config: EllaConfig): string {
@@ -162,28 +201,18 @@ async function setupWizard(config: EllaConfig): Promise<void> {
   output.write(`${theme.brand("Ella setup")}\n`);
   output.write(`${theme.muted("Paste key here once. Ella remembers it in global config.")}\n\n`);
 
-  output.write(`${theme.header("Providers")}\n${theme.command("1. openai")}\n${theme.command("2. anthropic")}\n${theme.command("3. gemini")}\n${theme.command("4. openrouter")}\n`);
-  const providerAnswer = await promptLine(`Provider (${config.defaultProvider}): `);
-  const providerByIndex: ProviderName[] = ["openai", "anthropic", "gemini", "openrouter"];
-  const provider =
-    providerAnswer.trim()
-      ? providerByIndex[Number(providerAnswer.trim()) - 1] || requireProvider(providerAnswer)
-      : config.defaultProvider;
-
-  config.defaultProvider = provider;
+  const provider = await chooseProvider(config);
+  applyProviderModel(config, provider);
 
   const currentKeyStatus = keyStatus(config, provider);
   const key = await promptLine(`API key for ${provider} [${currentKeyStatus}; Enter keep/skip]: `);
   if (key.trim()) {
+    await setApiKey(provider, key.trim());
     config.providers[provider] = { ...config.providers[provider], apiKey: key.trim() };
   }
 
-  output.write(`\n${renderModels(provider)}`);
-  const currentModel = config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
-  const modelAnswer = await promptLine(`Model name or number (${currentModel}): `);
-  const selectedModel = pickModel(provider, modelAnswer) || currentModel;
-  config.defaultModel = selectedModel;
-  config.providers[provider].defaultModel = selectedModel;
+  const selectedModel = await chooseModel(config, provider);
+  applyProviderModel(config, provider, selectedModel);
 
   const thinkingAnswer = await promptLine(`Thinking mode (${config.thinkingMode}) [fast/balanced/deep/max]: `);
   if (thinkingAnswer.trim()) {
@@ -348,10 +377,10 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
       output.write(renderModels(provider));
       continue;
     }
-    if (trimmed.startsWith("/provider ")) {
-      const provider = requireProvider(trimmed.slice("/provider ".length));
-      config.defaultProvider = provider;
-      config.defaultModel = config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
+    if (trimmed === "/provider" || trimmed.startsWith("/provider ")) {
+      const requested = trimmed.slice("/provider".length).trim();
+      const provider = await chooseProvider(config, requested || undefined);
+      applyProviderModel(config, provider);
       session.provider = config.defaultProvider;
       session.model = config.defaultModel;
       session.thinkingMode = config.thinkingMode;
@@ -360,12 +389,9 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
       output.write(`${theme.success("Provider set:")} ${theme.accent(provider)}. Model: ${theme.accent(config.defaultModel)}. Key: ${theme.accent(keyStatus(config, provider))}\n`);
       continue;
     }
-    if (trimmed.startsWith("/model ")) {
-      const selectedModel = pickModel(config.defaultProvider, trimmed.slice("/model ".length));
-      if (!selectedModel) {
-        output.write(renderModels(config.defaultProvider));
-        continue;
-      }
+    if (trimmed === "/model" || trimmed.startsWith("/model ")) {
+      const requested = trimmed.slice("/model".length).trim();
+      const selectedModel = await chooseModel(config, config.defaultProvider, requested || undefined);
       config.defaultModel = selectedModel;
       config.providers[config.defaultProvider].defaultModel = selectedModel;
       session.model = selectedModel;
@@ -504,7 +530,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
       output.write(`${theme.success("Accessibility updated.")}\n`);
       continue;
     }
-    if (trimmed === "/key status") {
+    if (trimmed === "/key" || trimmed === "/key status") {
       for (const provider of Object.keys(config.providers) as ProviderName[]) {
         output.write(`${kv(provider, keyStatus(config, provider))}\n`);
       }
@@ -518,6 +544,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
         output.write(`${theme.warning("No key saved.")}\n`);
         continue;
       }
+      await setApiKey(provider, key.trim());
       config.providers[provider] = { ...config.providers[provider], apiKey: key.trim() };
       await saveConfig(config);
       output.write(`${theme.success("Saved key for")} ${theme.accent(provider)}.\n`);
@@ -526,6 +553,7 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
     if (trimmed === "/key delete" || trimmed.startsWith("/key delete ")) {
       const requested = trimmed.slice("/key delete".length).trim();
       const provider = requested ? requireProvider(requested) : config.defaultProvider;
+      await removeAuth(provider);
       delete config.providers[provider].apiKey;
       await saveConfig(config);
       output.write(`${theme.success("Deleted stored key for")} ${theme.accent(provider)}. Env key status: ${theme.accent(envKeyForProvider(provider) ? "present" : "missing")}.\n`);
@@ -581,6 +609,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
     case "set-key": {
       const provider = requireProvider(rest[0] || "");
       const key = rest[1] || await promptLine(`API key for ${provider}: `);
+      await setApiKey(provider, key.trim());
       config.providers[provider] = { ...config.providers[provider], apiKey: key.trim() };
       if (!config.providers[provider].defaultModel) {
         config.providers[provider].defaultModel = DEFAULT_MODELS[provider];
@@ -593,6 +622,7 @@ async function handleConfig(config: EllaConfig, subArgs: string[]): Promise<void
     case "remove-key":
     case "clear-key": {
       const provider = requireProvider(rest[0] || "");
+      await removeAuth(provider);
       delete config.providers[provider].apiKey;
       await saveConfig(config);
       output.write(`${theme.success("Deleted stored key for")} ${theme.accent(provider)}. Env key status: ${theme.accent(envKeyForProvider(provider) ? "present" : "missing")}.\n`);
@@ -663,6 +693,7 @@ async function handleKey(config: EllaConfig, subArgs: string[]): Promise<void> {
     const provider = subArgs[1] ? requireProvider(subArgs[1]) : config.defaultProvider;
     const key = subArgs.slice(2).join(" ").trim() || await promptLine(`Paste API key for ${provider}: `);
     if (!key.trim()) throw new Error("No key provided.");
+    await setApiKey(provider, key.trim());
     config.providers[provider] = { ...config.providers[provider], apiKey: key.trim() };
     await saveConfig(config);
     output.write(`${theme.success("Saved key for")} ${theme.accent(provider)}.\n`);
@@ -670,6 +701,7 @@ async function handleKey(config: EllaConfig, subArgs: string[]): Promise<void> {
   }
   if (action === "delete" || action === "remove" || action === "clear") {
     const provider = subArgs[1] ? requireProvider(subArgs[1]) : config.defaultProvider;
+    await removeAuth(provider);
     delete config.providers[provider].apiKey;
     await saveConfig(config);
     output.write(`${theme.success("Deleted stored key for")} ${theme.accent(provider)}. Env key status: ${theme.accent(envKeyForProvider(provider) ? "present" : "missing")}.\n`);
@@ -828,19 +860,23 @@ async function main(): Promise<void> {
         await handleKey(config, args.slice(1));
         return;
       case "provider": {
-        const provider = requireProvider(args[1] || "");
-        config.defaultProvider = provider;
-        config.defaultModel = config.providers[provider].defaultModel || DEFAULT_MODELS[provider];
+        if (!args[1] && !isInteractiveTerminal()) {
+          output.write(renderProviders());
+          return;
+        }
+        const provider = await chooseProvider(config, args[1]);
+        applyProviderModel(config, provider);
         await saveConfig(config);
         output.write(`${theme.success("Provider set:")} ${theme.accent(provider)}. Model: ${theme.accent(config.defaultModel)}. Key: ${theme.accent(keyStatus(config, provider))}\n`);
         return;
       }
       case "model": {
-        const selectedModel = pickModel(config.defaultProvider, args.slice(1).join(" "));
-        if (!selectedModel) {
+        const requested = args.slice(1).join(" ");
+        if (!requested.trim() && !isInteractiveTerminal()) {
           output.write(renderModels(config.defaultProvider));
           return;
         }
+        const selectedModel = await chooseModel(config, config.defaultProvider, requested || undefined);
         config.defaultModel = selectedModel;
         config.providers[config.defaultProvider].defaultModel = selectedModel;
         await saveConfig(config);

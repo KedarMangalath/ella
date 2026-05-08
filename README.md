@@ -38,16 +38,17 @@ Ella is early sprint software with the main product spine in place: first-run se
 Run Ella, paste your API key when prompted, then type naturally.
 
 ```bash
-node dist/cli.js
+npm run install:global
+ella
 ```
 
 You can also skip command memorization:
 
 ```bash
-node dist/cli.js "fix the failing tests"
-node dist/cli.js review
-node dist/cli.js continue "keep going"
-git diff | node dist/cli.js review
+ella "fix the failing tests"
+ella review
+ella continue "keep going"
+git diff | ella review
 ```
 
 ## Install
@@ -55,15 +56,16 @@ git diff | node dist/cli.js review
 ```bash
 npm install
 npm run build
+npm run install:global
 ```
 
-Run locally:
+Run locally without linking:
 
 ```bash
 node dist/cli.js
 ```
 
-After publishing, the intended global command is:
+After linking, use:
 
 ```bash
 ella
@@ -74,7 +76,7 @@ ella
 Launch Ella:
 
 ```bash
-node dist/cli.js
+ella
 ```
 
 Ella prompts in the terminal:
@@ -87,36 +89,38 @@ Thinking mode (balanced) [fast/balanced/deep/max]:
 Approval mode (ask) [ask/auto-edit/full-auto/read-only]:
 ```
 
-The API key is remembered in your global Ella config.
+The API key is remembered in `~/.ella/auth.json`.
 
 ## API Keys
 
 Paste a key inside the CLI:
 
 ```bash
-node dist/cli.js setup
+ella setup
 ```
 
 Or set one directly:
 
 ```bash
-node dist/cli.js key set openai
-node dist/cli.js key set anthropic
-node dist/cli.js key set gemini
-node dist/cli.js key set openrouter
+ella key set openai
+ella key set anthropic
+ella key set gemini
+ella key set openrouter
 ```
 
 Delete a stored key:
 
 ```bash
-node dist/cli.js key delete openai
+ella key delete openai
 ```
 
 Check key status:
 
 ```bash
-node dist/cli.js key status
+ella key status
 ```
+
+Keys use an OpenCode-style provider-keyed auth store at `~/.ella/auth.json`; general preferences stay in `~/.ella/config.json`.
 
 Environment variables also work:
 
@@ -188,6 +192,8 @@ node dist/cli.js config set-model <model>
 node dist/cli.js config set-thinking <fast|balanced|deep|max>
 node dist/cli.js config set-approval <ask|auto-edit|full-auto|read-only>
 ```
+
+If you ran `npm run install:global`, use `ella` instead of `node dist/cli.js`.
 
 ## Terminal Theme
 
@@ -484,10 +490,10 @@ This creates:
 
 ## Security
 
-Do not commit API keys. Ella stores local keys in `~/.ella/config.json` by default. You can remove them with:
+Do not commit API keys. Ella stores local keys in `~/.ella/auth.json` by default. You can remove them with:
 
 ```bash
-node dist/cli.js key delete <provider>
+ella key delete <provider>
 ```
 
 For shared machines, prefer environment variables or a dedicated secret manager.
@@ -497,5 +503,6 @@ For shared machines, prefer environment variables or a dedicated secret manager.
 ```bash
 npm install
 npm run build
+npm run install:global
 npm run check
 ```

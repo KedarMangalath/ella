@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli.js",
     "dev": "npm run build && node dist/cli.js",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "install:global": "npm run build && npm link",
+    "link:global": "npm link"
   },
   "engines": {
     "node": ">=22"

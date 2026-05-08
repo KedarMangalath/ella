@@ -19,7 +19,7 @@ function ensureKey(config: EllaConfig, provider: ProviderName): string {
   const key = apiKeyForProvider(config, provider);
   if (!key) {
     throw new ProviderError(
-      `Missing API key for ${provider}. Run: ella setup or ella config set-key ${provider}`,
+      `Missing API key for ${provider}. Run: ella setup or ella key set ${provider}`,
     );
   }
   return key;
