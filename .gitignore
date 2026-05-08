@@ -11,6 +11,7 @@ coverage/
 .ella/
 .ella-test/
 .ella-test*/
+.ella-smoke*/
 .tmp/
 
 .env

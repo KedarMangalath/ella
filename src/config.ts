@@ -21,6 +21,7 @@ export function defaultConfig(): EllaConfig {
     defaultModel: DEFAULT_MODELS.openai,
     thinkingMode: "balanced",
     approvalMode: "ask",
+    permissions: [],
     accessibility: {
       noColor: false,
       reducedMotion: false,
@@ -49,6 +50,7 @@ export async function loadConfig(): Promise<EllaConfig> {
         ...base.accessibility,
         ...(parsed.accessibility || {}),
       },
+      permissions: parsed.permissions || [],
       providers: {
         ...base.providers,
         ...(parsed.providers || {}),

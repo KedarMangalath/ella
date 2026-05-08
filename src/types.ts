@@ -4,6 +4,14 @@ export type ThinkingMode = "fast" | "balanced" | "deep" | "max";
 
 export type ApprovalMode = "ask" | "auto-edit" | "full-auto" | "read-only";
 
+export type PermissionAction = "allow" | "deny" | "ask";
+
+export interface PermissionRule {
+  permission: string;
+  pattern: string;
+  action: PermissionAction;
+}
+
 export type ChatRole = "system" | "user" | "assistant";
 
 export interface ChatMessage {
@@ -49,6 +57,7 @@ export interface EllaConfig {
   defaultModel: string;
   thinkingMode: ThinkingMode;
   approvalMode: ApprovalMode;
+  permissions: PermissionRule[];
   accessibility: AccessibilitySettings;
   providers: Record<ProviderName, ProviderSettings>;
 }
@@ -77,6 +86,8 @@ export interface ToolDefinition {
   name: string;
   description: string;
   risk: ToolRisk;
+  permission?: string;
+  patterns?(input: Record<string, unknown>, context: ToolContext): Promise<string[]> | string[];
   preview?(input: Record<string, unknown>, context: ToolContext): Promise<string>;
   run(input: Record<string, unknown>, context: ToolContext): Promise<string>;
 }
@@ -84,5 +95,6 @@ export interface ToolDefinition {
 export interface ToolContext {
   cwd: string;
   approvalMode: ApprovalMode;
+  permissions: PermissionRule[];
   askApproval(reason: string): Promise<boolean>;
 }

@@ -47,6 +47,8 @@ import { renderEllaLogo } from "./logo.js";
 import { suggestTopLevelCommand } from "./commands/registry.js";
 import { handleIntegrationCommand } from "./integrations.js";
 import { authPath, removeAuth, setApiKey } from "./auth.js";
+import { applyPatch, previewPatch } from "./patch.js";
+import { formatPermissionRules, parsePermissionAction, removePermissionRule, upsertPermissionRule } from "./permissions.js";
 
 const args = process.argv.slice(2);
 
@@ -168,11 +170,18 @@ async function promptFromArgs(startIndex: number): Promise<string> {
   return [typed, piped].filter(Boolean).join("\n\n");
 }
 
+async function textFromSubArgs(subArgs: string[]): Promise<string> {
+  const typed = subArgs.join(" ").trim();
+  const piped = await readPipedInput();
+  return [typed, piped].filter(Boolean).join("\n\n");
+}
+
 function statusText(config: EllaConfig): string {
   return `${kv("Provider", config.defaultProvider)}
 ${kv("Model", config.defaultModel)}
 ${kv("Thinking", config.thinkingMode)}
 ${kv("Approval", config.approvalMode)}
+${kv("Permissions", `${config.permissions.length} custom`)}
 ${kv("Key", keyStatus(config, config.defaultProvider))}
 ${kv("Config", configPath())}
 ${kv("Auth", authPath())}`;
@@ -362,6 +371,14 @@ async function interactive(config: EllaConfig, resumeSessionId?: string): Promis
     }
     if (trimmed === "/tools") {
       output.write(`${toolHelp()}\n`);
+      continue;
+    }
+    if (trimmed === "/permissions" || trimmed.startsWith("/permissions ")) {
+      await handlePermissions(config, parseSlashArgs(trimmed, "permissions"));
+      continue;
+    }
+    if (trimmed === "/patch" || trimmed.startsWith("/patch ")) {
+      await handlePatch(parseSlashArgs(trimmed, "patch"));
       continue;
     }
     {
@@ -710,6 +727,54 @@ async function handleKey(config: EllaConfig, subArgs: string[]): Promise<void> {
   throw new Error("Use: ella key <status|set|delete> [provider]");
 }
 
+async function handlePermissions(config: EllaConfig, subArgs: string[]): Promise<void> {
+  const action = subArgs[0] || "list";
+  if (action === "list" || action === "show") {
+    output.write(`${formatPermissionRules(config.permissions)}\n`);
+    return;
+  }
+  if (action === "clear") {
+    config.permissions = [];
+    await saveConfig(config);
+    output.write(`${theme.success("Permission rules cleared.")}\n`);
+    return;
+  }
+  if (action === "remove" || action === "delete") {
+    const permission = subArgs[1];
+    const pattern = subArgs.slice(2).join(" ").trim() || "*";
+    if (!permission) throw new Error("Use: ella permissions remove <permission> <pattern>");
+    const before = config.permissions.length;
+    config.permissions = removePermissionRule(config.permissions, permission, pattern);
+    await saveConfig(config);
+    output.write(before === config.permissions.length
+      ? `${theme.warning("No matching permission rule.")}\n`
+      : `${theme.success("Permission rule removed.")}\n`);
+    return;
+  }
+
+  const parsedAction = parsePermissionAction(action);
+  if (!parsedAction) throw new Error("Use: ella permissions <list|allow|deny|ask|remove|clear> [permission] [pattern]");
+  const permission = subArgs[1];
+  const pattern = subArgs.slice(2).join(" ").trim() || "*";
+  if (!permission) throw new Error(`Use: ella permissions ${parsedAction} <permission> <pattern>`);
+  config.permissions = upsertPermissionRule(config.permissions, parsedAction, permission, pattern);
+  await saveConfig(config);
+  output.write(`${theme.success("Permission rule saved:")} ${theme.accent(`${parsedAction} ${permission} ${pattern}`)}\n`);
+}
+
+async function handlePatch(subArgs: string[]): Promise<void> {
+  const dryRun = subArgs.includes("--dry-run") || subArgs.includes("-n");
+  const textArgs = subArgs.filter((arg) => arg !== "--dry-run" && arg !== "-n");
+  const patchText = await textFromSubArgs(textArgs);
+  if (!patchText.trim()) {
+    throw new Error("Use: ella patch [--dry-run] <patch text> or pipe an Ella patch into stdin.");
+  }
+  const result = dryRun
+    ? await previewPatch(process.cwd(), patchText)
+    : await applyPatch(process.cwd(), patchText);
+  output.write(`${result}\n`);
+}
+
 async function main(): Promise<void> {
   const config = await loadConfig();
   applyAccessibilityEnvironment(config);
@@ -966,6 +1031,13 @@ async function main(): Promise<void> {
       }
       case "tools":
         output.write(`${toolHelp()}\n`);
+        return;
+      case "permissions":
+      case "permission":
+        await handlePermissions(config, args.slice(1));
+        return;
+      case "patch":
+        await handlePatch(args.slice(1));
         return;
       case "mcp":
       case "skills":

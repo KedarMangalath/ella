@@ -19,6 +19,7 @@ Available tools:
 - search_files: {"query":"text","path":".","maxResults":20}
 - write_file: {"path":"file","content":"new file content"}
 - replace_in_file: {"path":"file","find":"exact old text","replace":"new text"}
+- apply_patch: {"patch":"*** Begin Patch\n*** Update File: src/file.ts\n@@\n-old\n+new\n*** End Patch"}
 - run_shell: {"command":"npm test","cwd":"."}
 - git_status: {}
 - git_diff: {"path":"optional/file"}
@@ -30,7 +31,9 @@ Available tools:
 Rules:
 - Prefer read/search before editing.
 - Use replace_in_file for small edits.
+- Use apply_patch for multi-file edits, deletes, moves, or grouped line changes.
 - Use write_file only for new files or full rewrites.
+- Edit, shell, and protected-file operations may be controlled by allow/deny/ask permission rules.
 - Ask with normal text when task is ambiguous.
 - Keep final answers concise and include files changed plus checks run.`;
 }

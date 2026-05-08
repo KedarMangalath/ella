@@ -82,6 +82,7 @@ export class EllaAgent {
           () => runToolCall(call, {
             cwd: options.cwd,
             approvalMode: this.config.approvalMode,
+            permissions: this.config.permissions,
             askApproval,
           }),
         );

@@ -10,6 +10,10 @@ Ella includes code and structural adaptations from local open-source projects in
   - CLI logo module shape from `packages/opencode/src/cli/logo.ts`
   - Auth-store pattern from `packages/opencode/src/auth/index.ts`
   - Provider/model listing flow from `packages/opencode/src/cli/cmd/models.ts`
+  - Patch-tool structure from `packages/opencode/src/tool/apply_patch.ts`
+  - Patch parsing and file-operation ideas from `packages/opencode/src/patch/index.ts`
+  - Permission rule evaluation concepts from `packages/opencode/src/permission/index.ts`, `packages/opencode/src/permission/evaluate.ts`, and `packages/opencode/src/permission/arity.ts`
+  - Shell permission pattern ideas from `packages/opencode/src/tool/bash.ts`
 
 MIT license text is available in `../Agentic/opencode/LICENSE`.
 

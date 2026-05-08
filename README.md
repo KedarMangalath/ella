@@ -29,7 +29,8 @@ Ella is early sprint software with the main product spine in place: first-run se
 - Lightweight repository graph for symbol/import/path search and impact checks
 - Subagent profiles and swarm workflow prompts
 - MCP, skills, hooks, and extensions registry commands
-- Local coding tools for reading, searching, editing, shell commands, and git inspection
+- Local coding tools for reading, searching, patching, editing, shell commands, and git inspection
+- OpenCode-style permission rules with allow, deny, and ask actions
 - Permission modes with edit/shell previews for safer operation
 - Project initialization with `ELLA.md`
 
@@ -64,7 +65,7 @@ On Windows, this also removes npm's generated `ella.ps1` shim so PowerShell can 
 Run locally without linking:
 
 ```bash
-node dist/cli.js
+ella
 ```
 
 After linking, use:
@@ -136,66 +137,68 @@ OPENROUTER_API_KEY=...
 ## Commands
 
 ```bash
-node dist/cli.js
-node dist/cli.js ask "review this repo"
-node dist/cli.js "fix the failing tests"
-node dist/cli.js setup
-node dist/cli.js commands
-node dist/cli.js status
-node dist/cli.js key status
-node dist/cli.js key set [provider]
-node dist/cli.js key delete [provider]
-node dist/cli.js provider <provider>
-node dist/cli.js model <name-or-number>
-node dist/cli.js think <fast|balanced|deep|max>
-node dist/cli.js approval <ask|auto-edit|full-auto|read-only>
-node dist/cli.js base-url <provider> <url>
-node dist/cli.js sessions
-node dist/cli.js continue [prompt]
-node dist/cli.js resume [session-id]
-node dist/cli.js memory show
-node dist/cli.js memory add "Use strict TypeScript."
-node dist/cli.js todo list
-node dist/cli.js todo add "Add streaming responses"
-node dist/cli.js todo done <todo-id>
-node dist/cli.js plan "Add MCP support"
-node dist/cli.js review
-node dist/cli.js fix "Tests fail in provider parsing"
-node dist/cli.js explain "How tool permissions work"
-node dist/cli.js undo
-node dist/cli.js redo
-node dist/cli.js history
-node dist/cli.js graph build
-node dist/cli.js graph stats
-node dist/cli.js graph search "EllaAgent"
-node dist/cli.js graph impact "src/tools.ts"
-node dist/cli.js mcp list
-node dist/cli.js mcp add local "node server.js"
-node dist/cli.js skills list
-node dist/cli.js skills install reviewer ./skills/reviewer
-node dist/cli.js hooks add prebuild "npm run check"
-node dist/cli.js extensions install sample ./extension
-node dist/cli.js agents
-node dist/cli.js swarm "Add MCP support"
-git diff | node dist/cli.js review
-node dist/cli.js accessibility show
-node dist/cli.js accessibility set reducedMotion on
-node dist/cli.js init
-node dist/cli.js models
-node dist/cli.js tools
-node dist/cli.js doctor
-node dist/cli.js config show
-node dist/cli.js config set-key <provider>
-node dist/cli.js config delete-key <provider>
-node dist/cli.js config key-status
-node dist/cli.js config set-base-url <provider> <url>
-node dist/cli.js config set-provider <provider>
-node dist/cli.js config set-model <model>
-node dist/cli.js config set-thinking <fast|balanced|deep|max>
-node dist/cli.js config set-approval <ask|auto-edit|full-auto|read-only>
+ella
+ella ask "review this repo"
+ella "fix the failing tests"
+ella setup
+ella commands
+ella status
+ella key status
+ella key set [provider]
+ella key delete [provider]
+ella provider <provider>
+ella model <name-or-number>
+ella think <fast|balanced|deep|max>
+ella approval <ask|auto-edit|full-auto|read-only>
+ella permissions
+ella permissions allow run_shell npm
+ella permissions deny read_file "*.env"
+ella patch --dry-run
+ella base-url <provider> <url>
+ella sessions
+ella continue [prompt]
+ella resume [session-id]
+ella memory show
+ella memory add "Use strict TypeScript."
+ella todo list
+ella todo add "Add streaming responses"
+ella todo done <todo-id>
+ella plan "Add MCP support"
+ella review
+ella fix "Tests fail in provider parsing"
+ella explain "How tool permissions work"
+ella undo
+ella redo
+ella history
+ella graph build
+ella graph stats
+ella graph search "EllaAgent"
+ella graph impact "src/tools.ts"
+ella mcp list
+ella mcp add local "node server.js"
+ella skills list
+ella skills install reviewer ./skills/reviewer
+ella hooks add prebuild "npm run check"
+ella extensions install sample ./extension
+ella agents
+ella swarm "Add MCP support"
+git diff | ella review
+ella accessibility show
+ella accessibility set reducedMotion on
+ella init
+ella models
+ella tools
+ella doctor
+ella config show
+ella config set-key <provider>
+ella config delete-key <provider>
+ella config key-status
+ella config set-base-url <provider> <url>
+ella config set-provider <provider>
+ella config set-model <model>
+ella config set-thinking <fast|balanced|deep|max>
+ella config set-approval <ask|auto-edit|full-auto|read-only>
 ```
-
-If you ran `npm run install:global`, use `ella` instead of `node dist/cli.js`.
 
 ## Terminal Theme
 
@@ -206,19 +209,19 @@ Ella also renders a small line-based character in the CLI. The character is stat
 Disable color:
 
 ```bash
-NO_COLOR=1 node dist/cli.js
+NO_COLOR=1 ella
 ```
 
 Force color in environments that do not expose a TTY:
 
 ```bash
-FORCE_COLOR=1 node dist/cli.js commands
+FORCE_COLOR=1 ella commands
 ```
 
 Disable animation only:
 
 ```bash
-ELLA_NO_ANIMATION=1 node dist/cli.js
+ELLA_NO_ANIMATION=1 ella
 ```
 
 Providers:
@@ -254,6 +257,12 @@ Inside interactive mode:
 /new
 /config
 /tools
+/permissions
+/permissions allow <permission> <pattern>
+/permissions deny <permission> <pattern>
+/permissions ask <permission> <pattern>
+/permissions remove <permission> <pattern>
+/patch <patch-text>
 /models [provider]
 /provider <openai|anthropic|gemini|openrouter>
 /model <name-or-number>
@@ -289,11 +298,11 @@ Ella saves interactive sessions under `~/.ella/sessions`.
 One-shot prompts are saved too, so `continue` works after both interactive and non-interactive runs.
 
 ```bash
-node dist/cli.js sessions
-node dist/cli.js continue
-node dist/cli.js continue "Keep going from the last task"
-node dist/cli.js resume
-node dist/cli.js resume <session-id>
+ella sessions
+ella continue
+ella continue "Keep going from the last task"
+ella resume
+ella resume <session-id>
 ```
 
 Inside interactive mode:
@@ -310,11 +319,11 @@ Inside interactive mode:
 Ella has persistent accessibility settings:
 
 ```bash
-node dist/cli.js accessibility show
-node dist/cli.js accessibility set noColor on
-node dist/cli.js accessibility set reducedMotion on
-node dist/cli.js accessibility set highContrast on
-node dist/cli.js accessibility set screenReader on
+ella accessibility show
+ella accessibility set noColor on
+ella accessibility set reducedMotion on
+ella accessibility set highContrast on
+ella accessibility set screenReader on
 ```
 
 Settings:
@@ -329,9 +338,9 @@ Settings:
 Project memory is local to the current repo under `.ella/memory.md`.
 
 ```bash
-node dist/cli.js memory show
-node dist/cli.js memory add "Prefer small modules and strict types."
-node dist/cli.js memory clear
+ella memory show
+ella memory add "Prefer small modules and strict types."
+ella memory clear
 ```
 
 Inside interactive mode:
@@ -349,10 +358,10 @@ Ella automatically includes project memory in future prompts.
 Todos are stored under `.ella/todos.json` and injected into future prompts.
 
 ```bash
-node dist/cli.js todo list
-node dist/cli.js todo add "Implement MCP support"
-node dist/cli.js todo done <todo-id>
-node dist/cli.js todo clear
+ella todo list
+ella todo add "Implement MCP support"
+ella todo done <todo-id>
+ella todo clear
 ```
 
 ## Undo And Redo
@@ -360,9 +369,9 @@ node dist/cli.js todo clear
 Ella records tool-driven file edits in `.ella/undo.json`.
 
 ```bash
-node dist/cli.js history
-node dist/cli.js undo
-node dist/cli.js redo
+ella history
+ella undo
+ella redo
 ```
 
 Inside interactive mode:
@@ -378,10 +387,10 @@ Inside interactive mode:
 Ella includes a lightweight repository graph inspired by code-review-graph. It indexes paths, imports, symbols, and file sizes.
 
 ```bash
-node dist/cli.js graph build
-node dist/cli.js graph stats
-node dist/cli.js graph search "symbol-or-path"
-node dist/cli.js graph impact "src/tools.ts"
+ella graph build
+ella graph stats
+ella graph search "symbol-or-path"
+ella graph impact "src/tools.ts"
 ```
 
 The model can also use graph tools:
@@ -404,13 +413,13 @@ Ella includes built-in subagent profiles:
 List them:
 
 ```bash
-node dist/cli.js agents
+ella agents
 ```
 
 Run a swarm workflow:
 
 ```bash
-node dist/cli.js swarm "Implement streaming output"
+ella swarm "Implement streaming output"
 ```
 
 The swarm command asks Ella to coordinate the profiles through plan, context, changes, validation, risks, and next steps.
@@ -420,12 +429,12 @@ The swarm command asks Ella to coordinate the profiles through plan, context, ch
 Ella has Gemini CLI-style management commands for local integration entries. They are stored in `~/.ella/integrations.json`.
 
 ```bash
-node dist/cli.js mcp list
-node dist/cli.js mcp add local "node server.js"
-node dist/cli.js mcp disable local
-node dist/cli.js skills install reviewer ./skills/reviewer
-node dist/cli.js hooks add prebuild "npm run check"
-node dist/cli.js extensions install sample ./extension
+ella mcp list
+ella mcp add local "node server.js"
+ella mcp disable local
+ella skills install reviewer ./skills/reviewer
+ella hooks add prebuild "npm run check"
+ella extensions install sample ./extension
 ```
 
 Inside interactive mode:
@@ -452,6 +461,7 @@ Current tools:
 - `search_files`
 - `write_file`
 - `replace_in_file`
+- `apply_patch`
 - `run_shell`
 - `git_status`
 - `git_diff`
@@ -460,16 +470,58 @@ Current tools:
 - `graph_search`
 - `graph_impact`
 
-Edit and shell tools are permissioned according to the active approval mode.
+Edit and shell tools are permissioned according to the active approval mode and configured permission rules.
 
 In `ask` mode, Ella previews edits and shell commands before running them.
+
+## Permissions
+
+Ella has OpenCode-style permission rules. Rules are stored in `~/.ella/config.json` and are evaluated after built-in safety rules, so your explicit rule wins.
+
+```bash
+ella permissions
+ella permissions allow run_shell npm
+ella permissions ask apply_patch "src/**"
+ella permissions deny read_file "*.env"
+ella permissions remove run_shell npm
+ella permissions clear
+```
+
+Supported actions:
+
+- `allow`: run without prompting unless `read-only` mode blocks edits/shell
+- `ask`: always show a preview and wait for confirmation
+- `deny`: block the tool for the matching pattern
+
+Common permission names include `read_file`, `search_files`, `write_file`, `replace_in_file`, `apply_patch`, `run_shell`, `git_diff`, and the `graph_*` tools.
+
+## Apply Patch
+
+Ella can apply patch blocks from the model or from your terminal. Patch edits are recorded in undo history.
+
+```bash
+ella patch --dry-run < my-change.patch
+ella patch < my-change.patch
+ella undo
+```
+
+Patch format:
+
+```text
+*** Begin Patch
+*** Update File: src/example.ts
+@@
+-old text
++new text
+*** End Patch
+```
 
 ## Project Init
 
 Initialize a repo for Ella:
 
 ```bash
-node dist/cli.js init
+ella init
 ```
 
 This creates:
