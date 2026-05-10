@@ -21,7 +21,6 @@
 @@@@@@@@@@@@@@@@@@@=....#:::..#*@@@@@@@@@@@@@@@@@@
 ```
 
-> Colors render in the terminal at startup.
 
 # ELLA
 
