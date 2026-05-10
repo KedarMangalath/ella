@@ -8,11 +8,12 @@ import { TodoStrip, type TodoItem } from "./components/TodoStrip.js";
 import { HeatmapPane, type HeatEntry } from "./components/HeatmapPane.js";
 import { SessionTreePane, type TreeNode } from "./components/SessionTreePane.js";
 import { PairPane, type PairEntry } from "./components/PairPane.js";
+import { BridgePane, type BridgeColumnEntry } from "./components/BridgePane.js";
 import { ToolApproval, type ToolRisk } from "./components/ToolApproval.js";
 import { DiffViewer } from "./components/DiffViewer.js";
 import { colors } from "./theme.js";
 
-export type ActiveView = "chat" | "heatmap" | "tree" | "pair";
+export type ActiveView = "chat" | "heatmap" | "tree" | "pair" | "bridge";
 
 export interface AppConfig {
   provider: string;
@@ -85,6 +86,9 @@ export interface AppHandlers {
   addPairEntry: (entry: PairEntry) => void;
   setBudgetWarning: (msg: string) => void;
   requestApproval: (req: ApprovalRequest, resolve: (ok: boolean) => void) => void;
+  setBridgeColumns: (columns: BridgeColumnEntry[], mode?: string) => void;
+  updateBridgeColumn: (agentId: string, patch: Partial<BridgeColumnEntry>) => void;
+  setBridgeActive: (active: boolean) => void;
 }
 
 export interface AppProps {
@@ -94,12 +98,13 @@ export interface AppProps {
   initialEntries?: ChatEntry[];
 }
 
-const VIEWS: ActiveView[] = ["chat", "heatmap", "tree", "pair"];
+const VIEWS: ActiveView[] = ["chat", "heatmap", "tree", "pair", "bridge"];
 const VIEW_LABELS: Record<ActiveView, string> = {
-  chat: "^1 Chat",
+  chat:    "^1 Chat",
   heatmap: "^2 Heatmap",
-  tree: "^3 Tree",
-  pair: "^4 Pair",
+  tree:    "^3 Tree",
+  pair:    "^4 Pair",
+  bridge:  "^5 Bridge",
 };
 
 export function App({ config, onPrompt, onReady, initialEntries }: AppProps): React.ReactElement {
@@ -121,6 +126,9 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
   const [treeRoots, setTreeRoots] = useState<TreeNode[]>([]);
   const [treeActiveId, setTreeActiveId] = useState<string | undefined>(config.sessionId);
   const [pairEntries, setPairEntries] = useState<PairEntry[]>([]);
+  const [bridgeColumns, setBridgeColumns] = useState<BridgeColumnEntry[]>([]);
+  const [bridgeMode, setBridgeMode] = useState<string>("race");
+  const [bridgeActive, setBridgeActive] = useState(false);
   const [budgetWarning, setBudgetWarning] = useState<string | null>(null);
   const [approvalReq, setApprovalReq] = useState<ApprovalRequest | null>(null);
   const [activeDiff, setActiveDiff] = useState<{ title?: string; diff: string } | null>(null);
@@ -132,6 +140,7 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
     if (key.ctrl && input === "2") setActiveView("heatmap");
     if (key.ctrl && input === "3") setActiveView("tree");
     if (key.ctrl && input === "4") setActiveView("pair");
+    if (key.ctrl && input === "5") setActiveView("bridge");
     // Dismiss diff overlay
     if (activeDiff && key.escape) setActiveDiff(null);
   });
@@ -163,6 +172,16 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
         approvalResolver.current = resolve;
         setApprovalReq(req);
       },
+      setBridgeColumns: (columns, mode) => {
+        setBridgeColumns(columns);
+        if (mode) setBridgeMode(mode);
+      },
+      updateBridgeColumn: (agentId, patch) => {
+        setBridgeColumns((prev) => prev.map((c) =>
+          c.agentId === agentId ? { ...c, ...patch } : c,
+        ));
+      },
+      setBridgeActive: (active) => setBridgeActive(active),
     });
   }, [onReady]);
 
@@ -286,6 +305,9 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
           {activeView === "heatmap" && <HeatmapPane entries={heatEntries} />}
           {activeView === "tree"    && <SessionTreePane roots={treeRoots} activeId={treeActiveId} />}
           {activeView === "pair"    && <PairPane entries={pairEntries} />}
+          {activeView === "bridge"  && (
+            <BridgePane columns={bridgeColumns} mode={bridgeMode} active={bridgeActive} />
+          )}
         </Box>
       </Box>
 

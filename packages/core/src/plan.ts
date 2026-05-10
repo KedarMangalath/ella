@@ -2,7 +2,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SessionRecord, ChatMessage } from "./types.js";
 
-export interface EllaPlан {
+export interface EllaPlan {
   version: "1";
   sessionId: string;
   title: string;
@@ -28,7 +28,7 @@ function yamlescape(s: string): string {
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
 }
 
-function toYaml(plan: EllaPlан): string {
+function toYaml(plan: EllaPlan): string {
   const lines: string[] = [
     `# ELLA Plan — ${plan.title}`,
     `version: "1"`,
@@ -70,7 +70,7 @@ export async function exportPlan(session: SessionRecord, outputDir: string): Pro
     turn++;
   }
 
-  const plan: EllaPlан = {
+  const plan: EllaPlan = {
     version: "1",
     sessionId: session.id,
     title: session.title,

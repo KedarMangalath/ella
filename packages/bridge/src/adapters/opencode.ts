@@ -13,8 +13,6 @@ export class OpenCodeAdapter extends BaseAdapter {
 
   private port: number;
   private sessionId: string | null = null;
-  private pendingEvents: AgentStreamEvent[] = [];
-  private done = false;
 
   constructor(port = 4242) {
     super();
@@ -23,7 +21,6 @@ export class OpenCodeAdapter extends BaseAdapter {
 
   async start(cwd: string): Promise<void> {
     this._cwd = cwd;
-    // opencode exposes a local HTTP server — attempt to create a session
     try {
       const resp = await fetch(`http://localhost:${this.port}/session`, {
         method: "POST",
@@ -36,22 +33,17 @@ export class OpenCodeAdapter extends BaseAdapter {
         this._running = true;
       }
     } catch {
-      // opencode not running — mark unavailable
       this._running = false;
     }
   }
 
   async send(prompt: string): Promise<void> {
     if (!this._running || !this.sessionId) throw new Error("OpenCode adapter not running.");
-    this.pendingEvents = [];
-    this.done = false;
-
     const resp = await fetch(`http://localhost:${this.port}/session/${this.sessionId}/message`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text: prompt }),
     });
-
     if (!resp.ok) throw new Error(`OpenCode send failed: ${resp.status}`);
   }
 
@@ -61,16 +53,56 @@ export class OpenCodeAdapter extends BaseAdapter {
       return;
     }
 
-    // Poll events endpoint
-    while (!this.done) {
-      await new Promise((r) => setTimeout(r, 100));
+    // Use SSE streaming from the events endpoint
+    try {
+      const resp = await fetch(`http://localhost:${this.port}/session/${this.sessionId}/events/stream`, {
+        headers: { accept: "text/event-stream" },
+      });
+
+      if (!resp.ok || !resp.body) {
+        // Fall back to polling if SSE endpoint not available
+        yield* this._pollStream();
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          try {
+            const evt = JSON.parse(raw) as AgentStreamEvent;
+            yield { ...evt, agentId: "opencode" };
+            if (evt.kind === "done" || evt.kind === "error") return;
+          } catch { /* skip malformed lines */ }
+        }
+      }
+    } catch {
+      yield* this._pollStream();
+    }
+  }
+
+  private async *_pollStream(): AsyncGenerator<AgentStreamEvent> {
+    let done = false;
+    while (!done) {
+      await new Promise((r) => setTimeout(r, 150));
       try {
         const resp = await fetch(`http://localhost:${this.port}/session/${this.sessionId}/events`);
         if (!resp.ok) continue;
         const events = await resp.json() as AgentStreamEvent[];
         for (const evt of events) {
           yield { ...evt, agentId: "opencode" };
-          if (evt.kind === "done" || evt.kind === "error") { this.done = true; break; }
+          if (evt.kind === "done" || evt.kind === "error") { done = true; break; }
         }
       } catch { break; }
     }
@@ -81,7 +113,6 @@ export class OpenCodeAdapter extends BaseAdapter {
     try {
       await fetch(`http://localhost:${this.port}/session/${this.sessionId}/cancel`, { method: "POST" });
     } catch { /* ignore */ }
-    this.done = true;
   }
 
   async stop(): Promise<void> {

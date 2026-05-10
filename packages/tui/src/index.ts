@@ -17,4 +17,6 @@ export { SessionTreePane } from "./components/SessionTreePane.js";
 export type { TreeNode } from "./components/SessionTreePane.js";
 export { PairPane } from "./components/PairPane.js";
 export type { PairEntry } from "./components/PairPane.js";
+export { BridgePane } from "./components/BridgePane.js";
+export type { BridgeColumnEntry } from "./components/BridgePane.js";
 export { colors } from "./theme.js";

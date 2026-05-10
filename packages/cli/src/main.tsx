@@ -20,6 +20,7 @@ import {
   appendPair,
   loadSession,
   listSessions,
+  latestSession,
   formatSessionList,
   forkSession,
   getSessionTree,
@@ -45,7 +46,9 @@ import { McpManager } from "@ella/mcp";
 import { theme } from "@ella/shared";
 import { stdout } from "node:process";
 import { printBanner, bannerString } from "./banner.js";
-import type { ChatEntry } from "@ella/tui";
+import type { ChatEntry, BridgeColumnEntry } from "@ella/tui";
+
+import { execSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 
@@ -57,6 +60,21 @@ function flagValue(name: string): string | undefined {
   const idx = args.findIndex((a) => a === `--${name}` || a === `-${name[0]}`);
   if (idx === -1) return undefined;
   return args[idx + 1];
+}
+
+// ── Git context ───────────────────────────────────────────────────────────────
+async function getGitContext(cwd: string): Promise<string | null> {
+  try {
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const status = execSync("git status --short", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const log = execSync("git log --oneline -5", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const parts: string[] = [`## Git context\nBranch: ${branch}`];
+    if (status) parts.push(`Changed files:\n${status}`);
+    if (log) parts.push(`Recent commits:\n${log}`);
+    return parts.join("\n");
+  } catch {
+    return null;
+  }
 }
 
 // ── ella init ─────────────────────────────────────────────────────────────────
@@ -206,19 +224,30 @@ async function runTui(config: EllaConfig): Promise<void> {
   const skills = await loadSkills(cwd);
   const memory = await readMemory(cwd);
 
+  // Git context — inject current branch, status, recent commits
+  const gitCtx = await getGitContext(cwd);
+
   // Knowledge-graph context (best-effort, from code-review-graph MCP if connected)
   const graphCtx = await fetchGraphContext(mcpManager, cwd);
 
   const extraContext = [
     skillsPromptBlock(skills),
     memory ? `## Project memory\n${memory}` : "",
+    gitCtx ?? "",
     graphCtx ?? "",
   ].filter(Boolean).join("\n\n") || undefined;
 
   let session: SessionRecord | null = null;
   const sessionFlag = flagValue("session") ?? flagValue("resume");
   if (sessionFlag) {
-    try { session = await loadSession(sessionFlag); } catch { /* new session */ }
+    const exactId = sessionFlag === "last" ? null : sessionFlag;
+    if (exactId) {
+      try { session = await loadSession(exactId); } catch { /* new session */ }
+    }
+  }
+  // Auto-resume last session when --resume or --resume last is given
+  if (!session && (flag("resume") || sessionFlag === "last")) {
+    try { session = await latestSession(); } catch { /* no sessions yet */ }
   }
   if (!session) session = await createSession(config, cwd);
 
@@ -350,6 +379,15 @@ async function runTui(config: EllaConfig): Promise<void> {
   if (notices.length) {
     initialEntries.push({ id: "startup-notice", role: "system", text: notices.join("  |  "), timestamp: now + 1 });
   }
+  if (gitCtx) {
+    // Show compact git info (just branch + changed file count)
+    try {
+      const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      const statusLines = execSync("git status --short", { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split("\n").filter(Boolean);
+      const gitLine = `git: ${branch}${statusLines.length ? `  ${statusLines.length} changed` : "  clean"}`;
+      initialEntries.push({ id: "git-ctx", role: "system", text: gitLine, timestamp: now + 2 });
+    } catch { /* not a git repo — skip */ }
+  }
 
   // Clear the terminal before Ink takes ownership — prevents artifact stacking on Windows
   if (stdout.isTTY) stdout.write("\x1b[2J\x1b[H");
@@ -382,16 +420,22 @@ async function runTui(config: EllaConfig): Promise<void> {
 
 // ── Bridge inline ─────────────────────────────────────────────────────────────
 async function runBridgeInline(prompt: string, handlers: AppHandlers | null): Promise<void> {
-  const coordinator = new Coordinator({ mode: "race", agents: ["opencode", "gemini", "codex"] });
+  const modeArg = "race";
+  const agents: AgentId[] = ["opencode", "gemini", "codex"];
+  const coordinator = new Coordinator({ mode: modeArg, agents });
   await coordinator.start(process.cwd());
 
   const available = coordinator.availableAgents();
-  handlers?.dispatch({ type: "add", entry: {
-    id: `bridge-${Date.now()}`,
-    role: "system",
-    text: `Bridge: ${available.length ? available.join(", ") : "no agents available"} (race mode)`,
-    timestamp: Date.now(),
-  }});
+
+  // Initialize bridge panel columns (one per available agent)
+  const initialColumns: BridgeColumnEntry[] = available.map((id) => ({
+    agentId: id,
+    text: "",
+    done: false,
+  }));
+  handlers?.setBridgeColumns?.(initialColumns, modeArg);
+  handlers?.setBridgeActive?.(true);
+  handlers?.setView("bridge");
 
   if (!available.length) {
     handlers?.dispatch({ type: "add", entry: {
@@ -400,23 +444,46 @@ async function runBridgeInline(prompt: string, handlers: AppHandlers | null): Pr
       text: "No external agents running. Start opencode, gemini-cli, or codex first.",
       timestamp: Date.now(),
     }});
+    handlers?.setView("chat");
     return;
   }
 
   handlers?.setMascot("tool", "orchestrating…");
 
+  const startTimes: Record<string, number> = {};
+  for (const id of available) startTimes[id] = Date.now();
+
+  // Track accumulated text per agent so we can update via updateBridgeColumn
+  const colText: Record<string, string> = {};
+
   const result = await coordinator.run(prompt, (evt) => {
     if (evt.kind === "token" && evt.text) {
-      handlers?.dispatch({ type: "stream", text: `[${evt.agentId}] ${evt.text}` });
+      colText[evt.agentId] = (colText[evt.agentId] ?? "") + evt.text;
+      handlers?.updateBridgeColumn?.(evt.agentId, { text: colText[evt.agentId] });
+    }
+    if (evt.kind === "done" || evt.kind === "error") {
+      handlers?.updateBridgeColumn?.(evt.agentId, {
+        done: true,
+        durationMs: Date.now() - (startTimes[evt.agentId] ?? Date.now()),
+      });
     }
   });
 
+  // Mark winner
+  if (result.winner) {
+    handlers?.updateBridgeColumn?.(result.winner, { winner: true });
+  }
+
+  // Post final result to chat as well
   handlers?.dispatch({ type: "add", entry: {
     id: `bridge-result-${Date.now()}`,
     role: "assistant",
     text: result.finalText,
     timestamp: Date.now(),
   }});
+
+  handlers?.setMascot("celebrate", "bridge done!");
+  setTimeout(() => handlers?.setMascot("idle", "ready"), 2000);
 
   await coordinator.stop();
 }
@@ -478,6 +545,7 @@ async function handleSlashCommand(
         "/tree              — session fork tree  (Ctrl+3)",
         "/heatmap           — file touch heatmap  (Ctrl+2)",
         "/pair <prompt>     — two providers side-by-side  (Ctrl+4)",
+        "/bridge <task>     — race bridge panel          (Ctrl+5)",
         "/eval              — replay session, score drift",
         "/budget <usd>      — set cost budget",
         "/undo              — undo last file write",
@@ -778,8 +846,9 @@ async function main(): Promise<void> {
       "  --bridge-mode <mode>     route | race | debate (default: race)",
       "  --bridge-agents <list>   comma-separated: opencode,gemini,codex",
       "  --session <id>           resume a session by ID",
+      "  --resume [last]          resume the most recent session",
       "",
-      "TUI panels (Ctrl+1-4):     Chat  Heatmap  Tree  Pair",
+      "TUI panels (Ctrl+1-5):     Chat  Heatmap  Tree  Pair  Bridge",
       "",
       "Interactive slash commands:",
       "  /help /clear /session /model /provider /mode",

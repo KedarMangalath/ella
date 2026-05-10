@@ -1,3 +1,6 @@
+import { execSync } from "node:child_process";
+import { mkdirSync, existsSync } from "node:fs";
+import path from "node:path";
 import type {
   AgentAdapter,
   AgentId,
@@ -10,9 +13,31 @@ import { OpenCodeAdapter } from "./adapters/opencode.js";
 import { GeminiAdapter } from "./adapters/gemini.js";
 import { CodexAdapter } from "./adapters/codex.js";
 
+function isGitRepo(cwd: string): boolean {
+  try { execSync("git rev-parse --git-dir", { cwd, stdio: "ignore" }); return true; } catch { return false; }
+}
+
+function createWorktree(repoRoot: string, agentId: AgentId): string {
+  const base = path.join(repoRoot, ".git", "ella-bridge-worktrees");
+  mkdirSync(base, { recursive: true });
+  const worktreeDir = path.join(base, agentId);
+  if (existsSync(worktreeDir)) {
+    try { execSync(`git worktree remove --force "${worktreeDir}"`, { cwd: repoRoot, stdio: "ignore" }); } catch { /* stale ref — ignore */ }
+  }
+  const branch = `ella-bridge-${agentId}-${Date.now()}`;
+  execSync(`git worktree add "${worktreeDir}" -b "${branch}"`, { cwd: repoRoot });
+  return worktreeDir;
+}
+
+function removeWorktree(repoRoot: string, worktreeDir: string): void {
+  try { execSync(`git worktree remove --force "${worktreeDir}"`, { cwd: repoRoot, stdio: "ignore" }); } catch { /* ignore */ }
+  try { execSync("git worktree prune", { cwd: repoRoot, stdio: "ignore" }); } catch { /* ignore */ }
+}
+
 export class Coordinator {
   private adapters: Map<AgentId, AgentAdapter> = new Map();
   private config: BridgeConfig;
+  private worktrees: Map<AgentId, { repoRoot: string; dir: string }> = new Map();
 
   constructor(config: BridgeConfig) {
     this.config = config;
@@ -27,8 +52,20 @@ export class Coordinator {
   }
 
   async start(cwd: string): Promise<void> {
+    const useWorktrees = isGitRepo(cwd);
+
     await Promise.allSettled(
-      [...this.adapters.values()].map((a) => a.start(cwd)),
+      [...this.adapters.entries()].map(async ([id, adapter]) => {
+        let agentCwd = cwd;
+        if (useWorktrees) {
+          try {
+            const dir = createWorktree(cwd, id);
+            this.worktrees.set(id, { repoRoot: cwd, dir });
+            agentCwd = dir;
+          } catch { /* worktree creation failed — fall back to shared cwd */ }
+        }
+        await adapter.start(agentCwd);
+      }),
     );
   }
 
@@ -36,6 +73,10 @@ export class Coordinator {
     await Promise.allSettled(
       [...this.adapters.values()].map((a) => a.stop()),
     );
+    for (const [, { repoRoot, dir }] of this.worktrees) {
+      removeWorktree(repoRoot, dir);
+    }
+    this.worktrees.clear();
   }
 
   availableAgents(): AgentId[] {

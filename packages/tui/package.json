@@ -16,6 +16,7 @@
     "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\""
   },
   "dependencies": {
+    "@ella/bridge": "*",
     "@ella/core": "*",
     "@ella/shared": "*",
     "ink": "^5.2.1",

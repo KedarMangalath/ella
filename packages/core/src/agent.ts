@@ -15,7 +15,12 @@ import { parseToolCalls, runToolCall } from "./tools/index.js";
 import { estimateCost } from "./cost.js";
 import { theme } from "@ella/shared";
 
-const MAX_TURNS = 12;
+const MAX_TURNS = 20;
+
+// Rough token estimator: 1 token ≈ 4 chars
+const CHARS_PER_TOKEN = 4;
+// Leave headroom for output tokens
+const MAX_CONTEXT_CHARS = 180_000 * CHARS_PER_TOKEN;
 
 async function cliAskApproval(reason: string, preview?: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -30,6 +35,47 @@ async function cliAskApproval(reason: string, preview?: string): Promise<boolean
   }
 }
 
+function totalChars(messages: ChatMessage[]): number {
+  return messages.reduce((sum, m) => sum + m.content.length, 0);
+}
+
+/**
+ * When context grows too large, drop the oldest non-system user/assistant pairs
+ * while preserving the system prompt and the last N turns.
+ */
+function trimContext(messages: ChatMessage[], keepLastN = 6): ChatMessage[] {
+  if (totalChars(messages) <= MAX_CONTEXT_CHARS) return messages;
+
+  const system = messages.filter((m) => m.role === "system");
+  const conv = messages.filter((m) => m.role !== "system");
+
+  // Always keep last keepLastN messages
+  const keep = conv.slice(-keepLastN);
+  const candidates = conv.slice(0, -keepLastN);
+
+  // Drop candidates from oldest until under budget
+  let dropped = 0;
+  while (
+    dropped < candidates.length &&
+    totalChars([...system, ...candidates.slice(dropped), ...keep]) > MAX_CONTEXT_CHARS
+  ) {
+    dropped++;
+  }
+
+  const trimmedCount = dropped;
+  const result = [...system, ...candidates.slice(dropped), ...keep];
+
+  if (trimmedCount > 0) {
+    // Insert a marker so the model knows context was trimmed
+    result.splice(system.length, 0, {
+      role: "system",
+      content: `[${trimmedCount} earlier messages omitted to fit context window]`,
+    });
+  }
+
+  return result;
+}
+
 export class EllaAgent {
   constructor(
     private readonly provider: ModelProvider,
@@ -37,7 +83,6 @@ export class EllaAgent {
   ) {}
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
-    // Build MCP tool description list for the system prompt
     const mcpToolDescs = options.mcpManager?.allTools().map(
       (t) => `${t.name} [${t.serverName}]${t.description ? `: ${t.description}` : ""}`,
     );
@@ -73,6 +118,9 @@ export class EllaAgent {
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (options.signal?.aborted) break;
 
+      // Trim context before sending to avoid hitting provider limits
+      const trimmed = trimContext(messages);
+
       let responseText = "";
       let thinkingText = "";
 
@@ -83,7 +131,7 @@ export class EllaAgent {
         maxOutputTokens: maxOutputTokens(this.config.thinkingMode),
       };
 
-      for await (const event of this.provider.stream(messages, completeOptions)) {
+      for await (const event of this.provider.stream(trimmed, completeOptions)) {
         if (options.signal?.aborted) break;
         options.onEvent?.(event);
 
@@ -127,7 +175,7 @@ export class EllaAgent {
 
       messages.push({
         role: "user",
-        content: `Tool results:\n\n${results.join("\n\n")}\n\nContinue. If task is complete, give a concise final answer.`,
+        content: `Tool results:\n\n${results.join("\n\n")}\n\nContinue. If the task is complete, give a concise final answer.`,
       });
     }
 
