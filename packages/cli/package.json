@@ -1,0 +1,28 @@
+{
+  "name": "@ella/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "ella": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "npm run build && node dist/main.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\""
+  },
+  "dependencies": {
+    "@ella/core": "*",
+    "@ella/tui": "*",
+    "@ella/bridge": "*",
+    "@ella/mcp": "*",
+    "@ella/shared": "*",
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "@types/node": "^24.10.1",
+    "@types/react": "^18.3.20"
+  }
+}
