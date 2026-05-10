@@ -60,18 +60,7 @@ export class EllaAgent {
       cwd: options.cwd,
       approvalMode: this.config.approvalMode,
       permissions: this.config.permissions,
-      askApproval: options.onEvent
-        ? async (reason, preview) => {
-            return new Promise<boolean>((resolve) => {
-              options.onEvent?.({
-                kind: "tool_start",
-                toolName: reason,
-                toolInput: { preview: preview ?? "" },
-              });
-              resolve(true); // TODO: wire TUI ToolApproval component
-            });
-          }
-        : cliAskApproval,
+      askApproval: options.askApproval ?? cliAskApproval,
       onEvent: options.onEvent,
       onFileTouch: options.onFileTouch,
       undoJournal: options.undoJournal,

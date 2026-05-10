@@ -9,6 +9,7 @@ export interface ChatEntry {
   role: MessageRole;
   text: string;
   toolName?: string;
+  diff?: string;
   timestamp: number;
 }
 
@@ -44,26 +45,36 @@ function messageColor(role: MessageRole): string {
 
 interface ChatMessageProps {
   entry: ChatEntry;
+  onShowDiff?: (diff: string, title?: string) => void;
 }
 
-function ChatMessage({ entry }: ChatMessageProps): React.ReactElement {
-  // Banner entries render ANSI art without any color wrapper
+function ChatMessage({ entry, onShowDiff }: ChatMessageProps): React.ReactElement {
   if (entry.role === "banner") {
     return (
-      <Box flexDirection="column" marginBottom={0}>
+      <Box flexDirection="column">
         <Text>{entry.text}</Text>
       </Box>
     );
   }
 
   return (
-    <Box flexDirection="row" marginBottom={0}>
-      <Box width={9} flexShrink={0}>
-        <RoleLabel role={entry.role} toolName={entry.toolName} />
+    <Box flexDirection="column" marginBottom={0}>
+      <Box flexDirection="row">
+        <Box width={9} flexShrink={0}>
+          <RoleLabel role={entry.role} toolName={entry.toolName} />
+        </Box>
+        <Box flexGrow={1}>
+          <Text color={messageColor(entry.role)} wrap="wrap">{entry.text}</Text>
+        </Box>
       </Box>
-      <Box flexGrow={1}>
-        <Text color={messageColor(entry.role)} wrap="wrap">{entry.text}</Text>
-      </Box>
+      {entry.diff && onShowDiff && (
+        <Box marginLeft={9} marginTop={0}>
+          <Text
+            color={colors.orchid}
+            dimColor
+          >{"  [diff available — /diff to view]"}</Text>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -71,15 +82,16 @@ function ChatMessage({ entry }: ChatMessageProps): React.ReactElement {
 interface ChatPaneProps {
   entries: ChatEntry[];
   streaming?: string;
+  onShowDiff?: (diff: string, title?: string) => void;
 }
 
-export function ChatPane({ entries, streaming }: ChatPaneProps): React.ReactElement {
+export function ChatPane({ entries, streaming, onShowDiff }: ChatPaneProps): React.ReactElement {
   const visible = entries.slice(-40);
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={0}>
       {visible.map((e) => (
-        <ChatMessage key={e.id} entry={e} />
+        <ChatMessage key={e.id} entry={e} onShowDiff={onShowDiff} />
       ))}
       {streaming !== undefined && (
         <Box flexDirection="row">

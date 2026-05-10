@@ -266,6 +266,13 @@ async function runTui(config: EllaConfig): Promise<void> {
       extraContext: promptExtraContext,
       undoJournal,
       mcpManager,
+      askApproval: (reason, preview, risk) =>
+        new Promise<boolean>((resolve) => {
+          handlers?.requestApproval(
+            { reason, preview, risk: risk ?? "shell" },
+            resolve,
+          );
+        }),
       onFileTouch: (filePath) => {
         touchFile(session!, filePath);
         handlers?.setHeatmap(topTouchedFiles(session!));
@@ -282,6 +289,24 @@ async function runTui(config: EllaConfig): Promise<void> {
             role: "tool",
             text: `Running ${evt.toolName}…`,
             toolName: evt.toolName,
+            timestamp: Date.now(),
+          }});
+        }
+        if (evt.kind === "file_written" && evt.filePath) {
+          handlers?.dispatch({ type: "add", entry: {
+            id: `fw-${Date.now()}`,
+            role: "tool",
+            text: `Wrote ${evt.filePath}`,
+            toolName: "write_file",
+            diff: evt.diff,
+            timestamp: Date.now(),
+          }});
+        }
+        if (evt.kind === "lsp_diagnostic" && evt.text) {
+          handlers?.dispatch({ type: "add", entry: {
+            id: `lsp-${Date.now()}`,
+            role: "error",
+            text: `TypeScript: ${evt.text.slice(0, 600)}`,
             timestamp: Date.now(),
           }});
         }
@@ -462,6 +487,7 @@ async function handleSlashCommand(
         "/skills            — list loaded skills",
         "/plugins           — list loaded plugins",
         "/mcp               — list connected MCP servers + tools",
+        "/diff [path]       — show git diff in viewer",
         "/plan              — export session as .ella-plan.yaml",
         "/cost              — show cost summary",
         "/tag <label>       — tag session",
@@ -681,6 +707,25 @@ async function handleSlashCommand(
       if (!mcpManager || !mcpManager.serverCount()) { push("No MCP servers connected."); break; }
       const tools = mcpManager.allTools();
       push(`MCP: ${mcpManager.serverCount()} server(s), ${tools.length} tool(s)\n${tools.map((t) => `  [${t.serverName}] ${t.name}${t.description ? ` — ${t.description}` : ""}`).join("\n")}`);
+      break;
+    }
+
+    case "diff": {
+      const { execSync } = await import("node:child_process");
+      try {
+        const diffOutput = execSync(`git diff${arg ? ` -- ${arg}` : ""}`, { cwd, encoding: "utf8", maxBuffer: 2 * 1024 * 1024 }).trim();
+        if (!diffOutput) { push("No diff."); break; }
+        handlers?.dispatch({ type: "add", entry: {
+          id: `diff-${Date.now()}`,
+          role: "tool",
+          text: `git diff${arg ? ` ${arg}` : ""}`,
+          diff: diffOutput,
+          toolName: "git_diff",
+          timestamp: Date.now(),
+        }});
+      } catch (e) {
+        push(`diff failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+      }
       break;
     }
 

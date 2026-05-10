@@ -23,6 +23,11 @@ function num(input: Record<string, unknown>, key: string, fallback: number): num
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
+function bool(input: Record<string, unknown>, key: string, fallback = false): boolean {
+  const v = input[key];
+  return typeof v === "boolean" ? v : fallback;
+}
+
 function resolveInside(cwd: string, req: string): string {
   const target = path.resolve(cwd, req || ".");
   const root = path.resolve(cwd);
@@ -93,7 +98,7 @@ async function ensureApproval(tool: ToolDefinition, input: Record<string, unknow
     throw new Error(`Read-only mode denied ${tool.name}.`);
   if (isAutoAllowed(ctx.approvalMode, tool.risk)) return;
   const preview = tool.preview ? await tool.preview(input, ctx) : JSON.stringify(input);
-  const ok = await ctx.askApproval(`Allow ${tool.risk} tool "${tool.name}"?`, preview);
+  const ok = await ctx.askApproval(`Allow "${tool.name}"?`, preview, tool.risk);
   if (!ok) throw new Error(`User denied ${tool.name}.`);
 }
 
@@ -102,6 +107,60 @@ function previewText(text: string, max = 60): string {
   return lines.length > max
     ? `${lines.slice(0, max).join("\n")}\n… +${lines.length - max} lines`
     : text;
+}
+
+// Simple unified diff generator
+function simpleDiff(before: string, after: string, filepath: string): string {
+  const aLines = before.split("\n");
+  const bLines = after.split("\n");
+  const out: string[] = [`--- a/${filepath}`, `+++ b/${filepath}`];
+  const max = Math.max(aLines.length, bLines.length);
+  let hunkStart = -1;
+  const hunk: string[] = [];
+
+  for (let i = 0; i < max; i++) {
+    const a = aLines[i];
+    const b = bLines[i];
+    if (a !== b) {
+      if (hunkStart === -1) hunkStart = i;
+      if (a !== undefined) hunk.push(`-${a}`);
+      if (b !== undefined) hunk.push(`+${b}`);
+    } else if (hunk.length) {
+      out.push(`@@ -${hunkStart + 1} +${hunkStart + 1} @@`);
+      out.push(...hunk);
+      hunk.length = 0;
+      hunkStart = -1;
+    }
+  }
+  if (hunk.length) {
+    out.push(`@@ -${hunkStart + 1} +${hunkStart + 1} @@`);
+    out.push(...hunk);
+  }
+  return out.join("\n");
+}
+
+// Check if a file is TypeScript/JavaScript
+function isLspTarget(filePath: string): boolean {
+  return /\.(ts|tsx|js|jsx|mts|mjs)$/.test(filePath);
+}
+
+// Run tsc --noEmit for lightweight diagnostics
+async function runTscCheck(cwd: string): Promise<string | null> {
+  try {
+    const tsconfigExists = await fileExists(path.join(cwd, "tsconfig.json"));
+    if (!tsconfigExists) return null;
+    const { stdout, stderr } = await execAsync(
+      `npx tsc --noEmit --pretty false 2>&1 || true`,
+      { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 },
+    );
+    const output = (stdout + stderr).trim();
+    if (!output || output.includes("error TS") === false) return null;
+    // Compact: first 20 lines only
+    const lines = output.split("\n").filter((l) => l.includes("error TS")).slice(0, 20);
+    return lines.length ? lines.join("\n") : null;
+  } catch {
+    return null;
+  }
 }
 
 export const TOOLS: ToolDefinition[] = [
@@ -173,6 +232,21 @@ export const TOOLS: ToolDefinition[] = [
       const rel = path.relative(ctx.cwd, target).replaceAll(path.sep, "/");
       ctx.onFileTouch?.(rel);
       await ctx.undoJournal?.push({ path: target, before, after: content, tool: "write_file", timestamp: new Date().toISOString() });
+
+      // Emit diff event if file existed before
+      if (before !== null) {
+        const diff = simpleDiff(before, content, rel);
+        ctx.onEvent?.({ kind: "file_written", filePath: rel, diff });
+      } else {
+        ctx.onEvent?.({ kind: "file_written", filePath: rel });
+      }
+
+      // LSP-lite: run tsc after TypeScript writes
+      if (isLspTarget(target)) {
+        const diag = await runTscCheck(ctx.cwd);
+        if (diag) ctx.onEvent?.({ kind: "lsp_diagnostic", text: diag, filePath: rel });
+      }
+
       return `Wrote ${rel} (${content.length} chars).`;
     },
   },
@@ -197,7 +271,24 @@ export const TOOLS: ToolDefinition[] = [
       const rel = path.relative(ctx.cwd, target).replaceAll(path.sep, "/");
       ctx.onFileTouch?.(rel);
       await ctx.undoJournal?.push({ path: target, before, after, tool: "replace_in_file", timestamp: new Date().toISOString() });
+      const diff = simpleDiff(before, after, rel);
+      ctx.onEvent?.({ kind: "file_written", filePath: rel, diff });
+      if (isLspTarget(target)) {
+        const diag = await runTscCheck(ctx.cwd);
+        if (diag) ctx.onEvent?.({ kind: "lsp_diagnostic", text: diag, filePath: rel });
+      }
       return `Updated ${rel}.`;
+    },
+  },
+  {
+    name: "create_dir",
+    description: "Create a directory (and parents) in the workspace.",
+    risk: "edit",
+    patterns: (i) => [str(i, "path")],
+    async run(i, ctx) {
+      const target = resolveInside(ctx.cwd, str(i, "path"));
+      await mkdir(target, { recursive: true });
+      return `Created ${path.relative(ctx.cwd, target).replaceAll(path.sep, "/")}`;
     },
   },
   {
@@ -219,6 +310,29 @@ export const TOOLS: ToolDefinition[] = [
         maxBuffer: 5 * 1024 * 1024,
       });
       return [stdout, stderr].filter(Boolean).join("\n").trim() || "Command completed.";
+    },
+  },
+  {
+    name: "ts_check",
+    description: "Run TypeScript type-checker (tsc --noEmit) and return diagnostics.",
+    risk: "read",
+    patterns: () => ["tsc --noEmit", "type check"],
+    async run(_i, ctx) {
+      const tsconfigExists = await fileExists(path.join(ctx.cwd, "tsconfig.json"));
+      if (!tsconfigExists) return "No tsconfig.json found.";
+      try {
+        const { stdout, stderr } = await execAsync(
+          `npx tsc --noEmit --pretty false 2>&1 || true`,
+          { cwd: ctx.cwd, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 },
+        );
+        const output = (stdout + stderr).trim();
+        if (!output) return "No TypeScript errors.";
+        const errors = output.split("\n").filter((l) => l.includes("error TS"));
+        if (!errors.length) return "No TypeScript errors.";
+        return `TypeScript errors (${errors.length}):\n${errors.slice(0, 50).join("\n")}`;
+      } catch (e) {
+        return `ts_check failed: ${e instanceof Error ? e.message : String(e)}`;
+      }
     },
   },
   {
@@ -259,6 +373,42 @@ export const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "git_add",
+    description: "Stage files for commit. Pass path to stage specific file, or '.' for all changes.",
+    risk: "edit",
+    patterns: (i) => [`git add ${str(i, "path", ".")}`],
+    async preview(i) {
+      return `git add ${str(i, "path", ".")}`;
+    },
+    async run(i, ctx) {
+      if (!await fileExists(path.join(ctx.cwd, ".git"))) return "No .git directory.";
+      const p = str(i, "path", ".");
+      const safe = p.replace(/[;&|`$]/g, "");
+      const { stdout } = await execAsync(`git add ${JSON.stringify(safe)}`, { cwd: ctx.cwd });
+      return stdout.trim() || `Staged: ${safe}`;
+    },
+  },
+  {
+    name: "git_commit",
+    description: "Commit staged changes with a message.",
+    risk: "edit",
+    patterns: (i) => [`git commit -m ${JSON.stringify(str(i, "message"))}`],
+    async preview(i) {
+      return `git commit -m "${str(i, "message")}"`;
+    },
+    async run(i, ctx) {
+      if (!await fileExists(path.join(ctx.cwd, ".git"))) return "No .git directory.";
+      const message = str(i, "message");
+      if (!message) throw new Error("git_commit requires message.");
+      const noVerify = bool(i, "noVerify") ? " --no-verify" : "";
+      const { stdout } = await execAsync(
+        `git commit${noVerify} -m ${JSON.stringify(message)}`,
+        { cwd: ctx.cwd },
+      );
+      return stdout.trim();
+    },
+  },
+  {
     name: "run_sandboxed",
     description: "Run a shell command inside a Docker container (ephemeral, no network by default).",
     risk: "shell",
@@ -271,11 +421,9 @@ export const TOOLS: ToolDefinition[] = [
       if (!command) throw new Error("run_sandboxed requires command.");
       const image = str(i, "image", "node:22-alpine");
 
-      // Check Docker availability
       try {
         await execAsync("docker info", { timeout: 5000 });
       } catch {
-        // Fallback to regular shell if Docker unavailable
         const cwd = resolveInside(ctx.cwd, str(i, "cwd", "."));
         const { stdout, stderr } = await execAsync(shellCmd(command), {
           cwd,
@@ -323,7 +471,6 @@ export function parseToolCalls(text: string): ToolCall[] {
 export async function runToolCall(call: ToolCall, ctx: ToolContext): Promise<string> {
   const tool = TOOLS.find((t) => t.name === call.name);
 
-  // Built-in tool
   if (tool) {
     try {
       await ensureApproval(tool, call.input, ctx);
@@ -333,7 +480,6 @@ export async function runToolCall(call: ToolCall, ctx: ToolContext): Promise<str
     }
   }
 
-  // MCP tool fallthrough
   if (ctx.mcpManager) {
     try {
       const result = await ctx.mcpManager.callTool(call.name, call.input);

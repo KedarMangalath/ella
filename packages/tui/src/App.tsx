@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useReducer, useState } from "react";
+import React, { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { Mascot, type MascotState } from "./components/Mascot.js";
 import { ChatPane, type ChatEntry } from "./components/ChatPane.js";
@@ -8,6 +8,8 @@ import { TodoStrip, type TodoItem } from "./components/TodoStrip.js";
 import { HeatmapPane, type HeatEntry } from "./components/HeatmapPane.js";
 import { SessionTreePane, type TreeNode } from "./components/SessionTreePane.js";
 import { PairPane, type PairEntry } from "./components/PairPane.js";
+import { ToolApproval, type ToolRisk } from "./components/ToolApproval.js";
+import { DiffViewer } from "./components/DiffViewer.js";
 import { colors } from "./theme.js";
 
 export type ActiveView = "chat" | "heatmap" | "tree" | "pair";
@@ -65,6 +67,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 let counter = 0;
 function nextId(): string { return `e${++counter}`; }
 
+interface ApprovalRequest {
+  reason: string;
+  risk: ToolRisk;
+  preview?: string;
+}
+
 export interface AppHandlers {
   dispatch: (action: ChatAction) => void;
   setMascot: (state: MascotState, label: string) => void;
@@ -76,6 +84,7 @@ export interface AppHandlers {
   setSessionTree: (roots: TreeNode[], activeId?: string) => void;
   addPairEntry: (entry: PairEntry) => void;
   setBudgetWarning: (msg: string) => void;
+  requestApproval: (req: ApprovalRequest, resolve: (ok: boolean) => void) => void;
 }
 
 export interface AppProps {
@@ -113,12 +122,18 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
   const [treeActiveId, setTreeActiveId] = useState<string | undefined>(config.sessionId);
   const [pairEntries, setPairEntries] = useState<PairEntry[]>([]);
   const [budgetWarning, setBudgetWarning] = useState<string | null>(null);
+  const [approvalReq, setApprovalReq] = useState<ApprovalRequest | null>(null);
+  const [activeDiff, setActiveDiff] = useState<{ title?: string; diff: string } | null>(null);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const approvalResolver = useRef<((ok: boolean) => void) | null>(null);
 
   useInput((input, key) => {
     if (key.ctrl && input === "1") setActiveView("chat");
     if (key.ctrl && input === "2") setActiveView("heatmap");
     if (key.ctrl && input === "3") setActiveView("tree");
     if (key.ctrl && input === "4") setActiveView("pair");
+    // Dismiss diff overlay
+    if (activeDiff && key.escape) setActiveDiff(null);
   });
 
   useEffect(() => {
@@ -144,11 +159,20 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
         setBudgetWarning(msg);
         setTimeout(() => setBudgetWarning(null), 5000);
       },
+      requestApproval: (req, resolve) => {
+        approvalResolver.current = resolve;
+        setApprovalReq(req);
+      },
     });
   }, [onReady]);
 
   const handlePrompt = useCallback(async (prompt: string) => {
     if (busy) return;
+
+    setInputHistory((h) => {
+      if (h.at(-1) === prompt) return h;
+      return [...h, prompt].slice(-200);
+    });
 
     dispatchChat({ type: "add", entry: {
       id: nextId(),
@@ -166,6 +190,8 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
       await onPrompt(prompt);
       setMascotState("celebrate");
       setMascotLabel("done!");
+      // Terminal bell on task complete
+      process.stdout.write("\x07");
       setTimeout(() => { setMascotState("idle"); setMascotLabel("ready"); }, 2000);
     } catch (err) {
       dispatchChat({ type: "add", entry: {
@@ -182,6 +208,12 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
       dispatchChat({ type: "streamEnd" });
     }
   }, [busy, onPrompt, activeView]);
+
+  const handleApproval = useCallback((ok: boolean) => {
+    approvalResolver.current?.(ok);
+    approvalResolver.current = null;
+    setApprovalReq(null);
+  }, []);
 
   const rows = process.stdout.rows ?? 40;
 
@@ -207,6 +239,24 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
         </Box>
       )}
 
+      {/* Diff overlay */}
+      {activeDiff && (
+        <Box flexDirection="column" borderStyle="single" borderColor={colors.orchid} paddingX={1}>
+          <DiffViewer diff={activeDiff.diff} title={activeDiff.title} maxLines={20} />
+          <Text color={colors.dim}>Esc to dismiss</Text>
+        </Box>
+      )}
+
+      {/* Tool approval overlay */}
+      {approvalReq && (
+        <ToolApproval
+          reason={approvalReq.reason}
+          risk={approvalReq.risk}
+          preview={approvalReq.preview}
+          onRespond={handleApproval}
+        />
+      )}
+
       {/* Main area */}
       <Box flexGrow={1} flexDirection="row" overflow="hidden">
         {/* Mascot sidebar */}
@@ -227,17 +277,15 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
         {/* Content pane */}
         <Box flexGrow={1} flexDirection="column" overflow="hidden">
           {activeView === "chat" && (
-            <ChatPane entries={chat.entries} streaming={chat.streaming} />
+            <ChatPane
+              entries={chat.entries}
+              streaming={chat.streaming}
+              onShowDiff={(diff, title) => setActiveDiff({ diff, title })}
+            />
           )}
-          {activeView === "heatmap" && (
-            <HeatmapPane entries={heatEntries} />
-          )}
-          {activeView === "tree" && (
-            <SessionTreePane roots={treeRoots} activeId={treeActiveId} />
-          )}
-          {activeView === "pair" && (
-            <PairPane entries={pairEntries} />
-          )}
+          {activeView === "heatmap" && <HeatmapPane entries={heatEntries} />}
+          {activeView === "tree"    && <SessionTreePane roots={treeRoots} activeId={treeActiveId} />}
+          {activeView === "pair"    && <PairPane entries={pairEntries} />}
         </Box>
       </Box>
 
@@ -245,7 +293,7 @@ export function App({ config, onPrompt, onReady, initialEntries }: AppProps): Re
       {todos.length > 0 && <TodoStrip todos={todos} />}
 
       {/* Input */}
-      <InputBar disabled={busy} onSubmit={handlePrompt} />
+      <InputBar disabled={busy || !!approvalReq} onSubmit={handlePrompt} history={inputHistory} />
 
       {/* Status bar */}
       <StatusBar

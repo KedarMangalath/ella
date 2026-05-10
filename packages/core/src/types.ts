@@ -4,7 +4,7 @@ export type ApprovalMode = "ask" | "auto-edit" | "full-auto" | "read-only";
 export type PermissionAction = "allow" | "deny" | "ask";
 export type ChatRole = "system" | "user" | "assistant";
 export type ToolRisk = "read" | "edit" | "shell";
-export type StreamEventKind = "token" | "thinking" | "tool_start" | "tool_end" | "done" | "error" | "cost" | "budget_warn" | "budget_exceeded";
+export type StreamEventKind = "token" | "thinking" | "tool_start" | "tool_end" | "done" | "error" | "cost" | "budget_warn" | "budget_exceeded" | "file_written" | "lsp_diagnostic";
 
 export interface PermissionRule {
   permission: string;
@@ -26,6 +26,8 @@ export interface StreamEvent {
   inputTokens?: number;
   outputTokens?: number;
   errorMessage?: string;
+  filePath?: string;
+  diff?: string;
 }
 
 export interface SessionRecord {
@@ -172,7 +174,7 @@ export interface ToolContext {
   cwd: string;
   approvalMode: ApprovalMode;
   permissions: PermissionRule[];
-  askApproval(reason: string, preview?: string): Promise<boolean>;
+  askApproval(reason: string, preview?: string, risk?: ToolRisk): Promise<boolean>;
   onEvent?(event: StreamEvent): void;
   onFileTouch?(filePath: string): void;
   undoJournal?: UndoJournalLike;
@@ -190,6 +192,7 @@ export interface AgentRunOptions {
   undoJournal?: UndoJournalLike;
   extraContext?: string;
   mcpManager?: McpManagerLike;
+  askApproval?: (reason: string, preview?: string, risk?: ToolRisk) => Promise<boolean>;
 }
 
 export interface AgentRunResult {
