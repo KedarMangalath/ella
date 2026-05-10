@@ -5,6 +5,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "build": "node scripts/build-all.mjs",
+    "bundle": "node scripts/build-all.mjs && node scripts/bundle.mjs",
     "dev": "node scripts/build-all.mjs && node packages/cli/dist/main.js",
     "check": "turbo run check",
     "clean": "turbo run clean",

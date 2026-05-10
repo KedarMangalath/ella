@@ -258,6 +258,51 @@ export const TOOLS: ToolDefinition[] = [
       return stdout.trim() || "No commits.";
     },
   },
+  {
+    name: "run_sandboxed",
+    description: "Run a shell command inside a Docker container (ephemeral, no network by default).",
+    risk: "shell",
+    patterns: (i) => shellPatterns(str(i, "command")),
+    async preview(i) {
+      return `[sandboxed] ${str(i, "image", "node:22-alpine")}\n$ ${str(i, "command")}`;
+    },
+    async run(i, ctx) {
+      const command = str(i, "command");
+      if (!command) throw new Error("run_sandboxed requires command.");
+      const image = str(i, "image", "node:22-alpine");
+
+      // Check Docker availability
+      try {
+        await execAsync("docker info", { timeout: 5000 });
+      } catch {
+        // Fallback to regular shell if Docker unavailable
+        const cwd = resolveInside(ctx.cwd, str(i, "cwd", "."));
+        const { stdout, stderr } = await execAsync(shellCmd(command), {
+          cwd,
+          timeout: 120_000,
+          maxBuffer: 5 * 1024 * 1024,
+        });
+        return `[no Docker — ran directly]\n${[stdout, stderr].filter(Boolean).join("\n").trim() || "Done."}`;
+      }
+
+      const dockerCmd = [
+        "docker run --rm",
+        "--network none",
+        "--memory 512m",
+        "--cpus 1",
+        `--volume "${ctx.cwd}:/workspace"`,
+        "--workdir /workspace",
+        image,
+        "sh", "-c", JSON.stringify(command),
+      ].join(" ");
+
+      const { stdout, stderr } = await execAsync(dockerCmd, {
+        timeout: 120_000,
+        maxBuffer: 5 * 1024 * 1024,
+      });
+      return [stdout, stderr].filter(Boolean).join("\n").trim() || "Command completed.";
+    },
+  },
 ];
 
 export function parseToolCalls(text: string): ToolCall[] {
@@ -277,13 +322,29 @@ export function parseToolCalls(text: string): ToolCall[] {
 
 export async function runToolCall(call: ToolCall, ctx: ToolContext): Promise<string> {
   const tool = TOOLS.find((t) => t.name === call.name);
-  if (!tool) return `Unknown tool: ${call.name}`;
-  try {
-    await ensureApproval(tool, call.input, ctx);
-    return await tool.run(call.input, ctx);
-  } catch (e) {
-    return `Tool ${call.name} failed: ${e instanceof Error ? e.message : String(e)}`;
+
+  // Built-in tool
+  if (tool) {
+    try {
+      await ensureApproval(tool, call.input, ctx);
+      return await tool.run(call.input, ctx);
+    } catch (e) {
+      return `Tool ${call.name} failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
+
+  // MCP tool fallthrough
+  if (ctx.mcpManager) {
+    try {
+      const result = await ctx.mcpManager.callTool(call.name, call.input);
+      if (typeof result === "string") return result;
+      return JSON.stringify(result, null, 2);
+    } catch (e) {
+      return `MCP tool ${call.name} failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
+  return `Unknown tool: ${call.name}`;
 }
 
 export function toolHelp(): string {

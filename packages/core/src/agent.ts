@@ -37,7 +37,12 @@ export class EllaAgent {
   ) {}
 
   async run(options: AgentRunOptions): Promise<AgentRunResult> {
-    const sysPrompt = systemPrompt(this.config.thinkingMode, options.extraContext);
+    // Build MCP tool description list for the system prompt
+    const mcpToolDescs = options.mcpManager?.allTools().map(
+      (t) => `${t.name} [${t.serverName}]${t.description ? `: ${t.description}` : ""}`,
+    );
+
+    const sysPrompt = systemPrompt(this.config.thinkingMode, options.extraContext, mcpToolDescs);
     const messages: ChatMessage[] = options.messages?.length
       ? [...options.messages]
       : [{ role: "system", content: sysPrompt }];
@@ -70,6 +75,7 @@ export class EllaAgent {
       onEvent: options.onEvent,
       onFileTouch: options.onFileTouch,
       undoJournal: options.undoJournal,
+      mcpManager: options.mcpManager,
     };
 
     const budget = options.budgetUsd ?? 0;

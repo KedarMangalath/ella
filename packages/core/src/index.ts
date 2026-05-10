@@ -13,6 +13,8 @@ export * from "./undo.js";
 export * from "./skills.js";
 export * from "./plan.js";
 export * from "./init.js";
+export * from "./updater.js";
+export * from "./plugin.js";
 export { createProvider } from "./providers/index.js";
 export { AnthropicProvider } from "./providers/anthropic.js";
 export { OpenAIProvider } from "./providers/openai.js";

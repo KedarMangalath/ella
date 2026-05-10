@@ -8,6 +8,8 @@ import {
   EvalRunner,
   PairRunner,
   UndoJournal,
+  PluginManager,
+  checkForUpdate,
   loadConfig,
   saveConfig,
   createProvider,
@@ -182,10 +184,15 @@ async function runTui(config: EllaConfig): Promise<void> {
   const provider = createProvider(config, config.defaultProvider);
   const agent = new EllaAgent(provider, config);
   const mcpManager = new McpManager();
+  const pluginManager = new PluginManager();
 
-  for (const srv of config.mcpServers ?? []) {
-    await mcpManager.addServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
-  }
+  // Load MCP servers + plugins in parallel
+  await Promise.all([
+    ...((config.mcpServers ?? []).map((srv) =>
+      mcpManager.addServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env })
+    )),
+    pluginManager.loadAll(cwd),
+  ]);
 
   // Load skills for extra context
   const skills = await loadSkills(cwd);
@@ -225,20 +232,23 @@ async function runTui(config: EllaConfig): Promise<void> {
     }
 
     if (prompt.startsWith("/")) {
-      await handleSlashCommand(prompt, config, session, handlers, provider, cwd, refreshTree, undoJournal, turnIndex);
+      await handleSlashCommand(prompt, config, session, handlers, provider, cwd, refreshTree, undoJournal, turnIndex, pluginManager, mcpManager);
       return;
     }
 
+    // Run beforePrompt plugins
+    const finalPrompt = await pluginManager.runBeforePrompt(prompt, cwd);
     const currentTurn = turnIndex;
     handlers?.setMascot("think", "thinking…");
 
     const result = await agent.run({
       cwd,
-      prompt,
+      prompt: finalPrompt,
       messages: session.messages.length ? session.messages : undefined,
       budgetUsd: session.budgetUsd,
       extraContext,
       undoJournal,
+      mcpManager,
       onFileTouch: (filePath) => {
         touchFile(session!, filePath);
         handlers?.setHeatmap(topTouchedFiles(session!));
@@ -270,7 +280,8 @@ async function runTui(config: EllaConfig): Promise<void> {
       signal: undefined,
     });
 
-    appendPair(session, prompt, result.text);
+    await pluginManager.runAfterPrompt(finalPrompt, result.text, cwd);
+    appendPair(session, finalPrompt, result.text);
     session.costUsd += result.costUsd;
     turnIndex++;
     await saveSession(session);
@@ -292,15 +303,27 @@ async function runTui(config: EllaConfig): Promise<void> {
       onReady={(h) => {
         handlers = h;
         void refreshTree();
-        // Show loaded skills count
-        if (skills.length) {
+        const notices: string[] = [];
+        if (skills.length) notices.push(`${skills.length} skill(s): ${skills.map((s) => s.name).join(", ")}`);
+        if (mcpManager.toolCount()) notices.push(`${mcpManager.serverCount()} MCP server(s), ${mcpManager.toolCount()} tool(s)`);
+        if (pluginManager.list().length) notices.push(`plugins: ${pluginManager.list().join(", ")}`);
+        if (notices.length) {
           h.dispatch({ type: "add", entry: {
-            id: "skills-loaded",
+            id: "startup-notice",
             role: "system",
-            text: `Loaded ${skills.length} skill(s): ${skills.map((s) => s.name).join(", ")}`,
+            text: notices.join("  |  "),
             timestamp: Date.now(),
           }});
         }
+        // Check for updates in background
+        void checkForUpdate().then((notice) => {
+          if (notice) h.dispatch({ type: "add", entry: {
+            id: "update-notice",
+            role: "system",
+            text: `✦ ${notice}`,
+            timestamp: Date.now(),
+          }});
+        });
       }}
     />,
     { exitOnCtrlC: true },
@@ -378,6 +401,8 @@ async function handleSlashCommand(
   refreshTree: () => Promise<void>,
   undoJournal: UndoJournal,
   currentTurn: number,
+  pluginManager?: PluginManager,
+  mcpManager?: McpManager,
 ): Promise<void> {
   const [cmd, ...rest] = input.slice(1).split(" ");
   const arg = rest.join(" ").trim();
@@ -413,6 +438,8 @@ async function handleSlashCommand(
         "/remember <text>   — add to project memory",
         "/memory            — show project memory",
         "/skills            — list loaded skills",
+        "/plugins           — list loaded plugins",
+        "/mcp               — list connected MCP servers + tools",
         "/plan              — export session as .ella-plan.yaml",
         "/cost              — show cost summary",
         "/tag <label>       — tag session",
@@ -619,6 +646,19 @@ async function handleSlashCommand(
       session.tags.push(arg);
       await saveSession(session);
       push(`Tagged: ${session.tags.join(", ")}`);
+      break;
+    }
+
+    case "plugins": {
+      const list = pluginManager?.list() ?? [];
+      push(list.length ? `Plugins:\n${list.map((p) => `  ${p}`).join("\n")}` : "No plugins loaded. Add .js files to .ella/plugins/ or ~/.ella/plugins/");
+      break;
+    }
+
+    case "mcp": {
+      if (!mcpManager || !mcpManager.serverCount()) { push("No MCP servers connected."); break; }
+      const tools = mcpManager.allTools();
+      push(`MCP: ${mcpManager.serverCount()} server(s), ${tools.length} tool(s)\n${tools.map((t) => `  [${t.serverName}] ${t.name}${t.description ? ` — ${t.description}` : ""}`).join("\n")}`);
       break;
     }
 
