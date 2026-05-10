@@ -42,6 +42,7 @@ import { Coordinator, type BridgeConfig, type AgentId } from "@ella/bridge";
 import { McpManager } from "@ella/mcp";
 import { theme } from "@ella/shared";
 import { stdout } from "node:process";
+import { printBanner } from "./banner.js";
 
 const args = process.argv.slice(2);
 
@@ -691,9 +692,8 @@ async function main(): Promise<void> {
   if (approvalArg) config.approvalMode = approvalModeFromString(approvalArg);
 
   if (flag("help") || flag("h") || firstArg === "help") {
+    printBanner();
     stdout.write([
-      "ella — model-agnostic agentic CLI",
-      "",
       "Usage:",
       "  ella [options] [prompt]",
       "  ella init                         set up .ella/ in current project",
@@ -735,6 +735,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (stdout.isTTY) printBanner();
   await runTui(config);
 }
 
