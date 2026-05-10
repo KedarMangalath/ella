@@ -51,8 +51,8 @@ function isNewer(a: string, b: string): boolean {
 
 async function currentVersion(): Promise<string> {
   try {
-    // Look for package.json in the CLI package
-    const pkgPath = new URL("../../package.json", import.meta.url);
+    // From packages/core/dist/updater.js, root package.json is 3 levels up
+    const pkgPath = new URL("../../../package.json", import.meta.url);
     const raw = await readFile(pkgPath, "utf8");
     return (JSON.parse(raw) as { version?: string }).version ?? "0.0.0";
   } catch {

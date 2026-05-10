@@ -40,13 +40,17 @@ const ART: Line[] = [
   [[MAUVE, "@@@@@@@@@@@@@@@@@@@=....#:::.."], [GOLD, "#*@@@@"], [MAUVE, "@@@@@@@@@@@@@@"]],
 ];
 
-export function printBanner(): void {
-  process.stdout.write("\n");
+export function bannerString(): string {
+  let out = "\n";
   for (const line of ART) {
-    let out = "";
     for (const [color, text] of line) out += color + text;
-    process.stdout.write(out + RESET + "\n");
+    out += RESET + "\n";
   }
-  process.stdout.write("\n");
-  process.stdout.write(ORCHID + "  ELLA" + RESET + "  " + DIM + "agentic coding assistant" + RESET + "\n\n");
+  out += "\n";
+  out += ORCHID + "  ELLA" + RESET + "  " + DIM + "agentic coding assistant" + RESET + "\n";
+  return out;
+}
+
+export function printBanner(): void {
+  process.stdout.write(bannerString() + "\n");
 }

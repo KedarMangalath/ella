@@ -1,5 +1,5 @@
 export { App } from "./App.js";
-export type { AppConfig, AppHandlers, EllaEvent, ActiveView } from "./App.js";
+export type { AppConfig, AppHandlers, EllaEvent, ActiveView, AppProps } from "./App.js";
 export { Mascot } from "./components/Mascot.js";
 export type { MascotState, MascotProps } from "./components/Mascot.js";
 export { ChatPane } from "./components/ChatPane.js";

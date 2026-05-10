@@ -2,7 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import { colors } from "../theme.js";
 
-export type MessageRole = "user" | "assistant" | "tool" | "thinking" | "error" | "system";
+export type MessageRole = "user" | "assistant" | "tool" | "thinking" | "error" | "system" | "banner";
 
 export interface ChatEntry {
   id: string;
@@ -25,6 +25,7 @@ function RoleLabel({ role, toolName }: RoleLabelProps): React.ReactElement {
     case "tool":      return <Text color={colors.gold}    bold>  {`⚙ ${(toolName ?? "tool").slice(0, 6)}`} </Text>;
     case "error":     return <Text color={colors.danger}  bold>  err  </Text>;
     case "system":    return <Text color={colors.muted}   bold>  sys  </Text>;
+    case "banner":    return <Text>{""}</Text>;
     default:          return <Text>  ?    </Text>;
   }
 }
@@ -46,6 +47,15 @@ interface ChatMessageProps {
 }
 
 function ChatMessage({ entry }: ChatMessageProps): React.ReactElement {
+  // Banner entries render ANSI art without any color wrapper
+  if (entry.role === "banner") {
+    return (
+      <Box flexDirection="column" marginBottom={0}>
+        <Text>{entry.text}</Text>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="row" marginBottom={0}>
       <Box width={9} flexShrink={0}>

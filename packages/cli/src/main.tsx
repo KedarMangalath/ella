@@ -10,6 +10,8 @@ import {
   UndoJournal,
   PluginManager,
   checkForUpdate,
+  fetchGraphContext,
+  fetchGraphContextForPrompt,
   loadConfig,
   saveConfig,
   createProvider,
@@ -42,7 +44,8 @@ import { Coordinator, type BridgeConfig, type AgentId } from "@ella/bridge";
 import { McpManager } from "@ella/mcp";
 import { theme } from "@ella/shared";
 import { stdout } from "node:process";
-import { printBanner } from "./banner.js";
+import { printBanner, bannerString } from "./banner.js";
+import type { ChatEntry } from "@ella/tui";
 
 const args = process.argv.slice(2);
 
@@ -138,7 +141,11 @@ async function runHeadless(config: EllaConfig, prompt: string): Promise<void> {
   const cwd = process.cwd();
 
   const skills = await loadSkills(cwd);
-  const extraContext = skillsPromptBlock(skills) || undefined;
+  const memory = await readMemory(cwd);
+  const extraContext = [
+    skillsPromptBlock(skills),
+    memory ? `## Project memory\n${memory}` : "",
+  ].filter(Boolean).join("\n\n") || undefined;
 
   const result = await agent.run({
     cwd,
@@ -198,9 +205,14 @@ async function runTui(config: EllaConfig): Promise<void> {
   // Load skills for extra context
   const skills = await loadSkills(cwd);
   const memory = await readMemory(cwd);
+
+  // Knowledge-graph context (best-effort, from code-review-graph MCP if connected)
+  const graphCtx = await fetchGraphContext(mcpManager, cwd);
+
   const extraContext = [
     skillsPromptBlock(skills),
     memory ? `## Project memory\n${memory}` : "",
+    graphCtx ?? "",
   ].filter(Boolean).join("\n\n") || undefined;
 
   let session: SessionRecord | null = null;
@@ -242,12 +254,16 @@ async function runTui(config: EllaConfig): Promise<void> {
     const currentTurn = turnIndex;
     handlers?.setMascot("think", "thinking…");
 
+    // Enrich context with graph semantic search for this specific prompt
+    const promptGraphCtx = await fetchGraphContextForPrompt(mcpManager, finalPrompt);
+    const promptExtraContext = [extraContext, promptGraphCtx].filter(Boolean).join("\n\n") || undefined;
+
     const result = await agent.run({
       cwd,
       prompt: finalPrompt,
       messages: session.messages.length ? session.messages : undefined,
       budgetUsd: session.budgetUsd,
-      extraContext,
+      extraContext: promptExtraContext,
       undoJournal,
       mcpManager,
       onFileTouch: (filePath) => {
@@ -297,26 +313,31 @@ async function runTui(config: EllaConfig): Promise<void> {
     sessionId: session.id,
   };
 
+  // Build initial entries synchronously — part of first render, no re-paint needed
+  const now = Date.now();
+  const initialEntries: ChatEntry[] = [
+    { id: "welcome-banner", role: "banner", text: bannerString(), timestamp: now },
+  ];
+  const notices: string[] = [];
+  if (skills.length) notices.push(`${skills.length} skill(s): ${skills.map((s) => s.name).join(", ")}`);
+  if (mcpManager.toolCount()) notices.push(`${mcpManager.serverCount()} MCP server(s), ${mcpManager.toolCount()} tool(s)`);
+  if (pluginManager.list().length) notices.push(`plugins: ${pluginManager.list().join(", ")}`);
+  if (notices.length) {
+    initialEntries.push({ id: "startup-notice", role: "system", text: notices.join("  |  "), timestamp: now + 1 });
+  }
+
+  // Clear the terminal before Ink takes ownership — prevents artifact stacking on Windows
+  if (stdout.isTTY) stdout.write("\x1b[2J\x1b[H");
+
   const { waitUntilExit } = render(
     <App
       config={appConfig}
       onPrompt={handlePrompt}
+      initialEntries={initialEntries}
       onReady={(h) => {
         handlers = h;
         void refreshTree();
-        const notices: string[] = [];
-        if (skills.length) notices.push(`${skills.length} skill(s): ${skills.map((s) => s.name).join(", ")}`);
-        if (mcpManager.toolCount()) notices.push(`${mcpManager.serverCount()} MCP server(s), ${mcpManager.toolCount()} tool(s)`);
-        if (pluginManager.list().length) notices.push(`plugins: ${pluginManager.list().join(", ")}`);
-        if (notices.length) {
-          h.dispatch({ type: "add", entry: {
-            id: "startup-notice",
-            role: "system",
-            text: notices.join("  |  "),
-            timestamp: Date.now(),
-          }});
-        }
-        // Check for updates in background
+        // Check for updates in background (this is the only post-render dispatch)
         void checkForUpdate().then((notice) => {
           if (notice) h.dispatch({ type: "add", entry: {
             id: "update-notice",
@@ -735,7 +756,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (stdout.isTTY) printBanner();
   await runTui(config);
 }
 

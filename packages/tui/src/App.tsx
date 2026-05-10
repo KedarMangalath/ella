@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import React, { useCallback, useEffect, useReducer, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { Mascot, type MascotState } from "./components/Mascot.js";
 import { ChatPane, type ChatEntry } from "./components/ChatPane.js";
@@ -78,10 +78,11 @@ export interface AppHandlers {
   setBudgetWarning: (msg: string) => void;
 }
 
-interface AppProps {
+export interface AppProps {
   config: AppConfig;
   onPrompt: (prompt: string) => Promise<void>;
   onReady?: (handlers: AppHandlers) => void;
+  initialEntries?: ChatEntry[];
 }
 
 const VIEWS: ActiveView[] = ["chat", "heatmap", "tree", "pair"];
@@ -92,7 +93,7 @@ const VIEW_LABELS: Record<ActiveView, string> = {
   pair: "^4 Pair",
 };
 
-export function App({ config, onPrompt, onReady }: AppProps): React.ReactElement {
+export function App({ config, onPrompt, onReady, initialEntries }: AppProps): React.ReactElement {
   useApp();
 
   const [mascotState, setMascotState] = useState<MascotState>("idle");
@@ -102,7 +103,10 @@ export function App({ config, onPrompt, onReady }: AppProps): React.ReactElement
   const [inputTokens, setInputTokens] = useState(0);
   const [outputTokens, setOutputTokens] = useState(0);
   const [costUsd, setCostUsd] = useState(0);
-  const [chat, dispatchChat] = useReducer(chatReducer, { entries: [], streaming: undefined });
+  const [chat, dispatchChat] = useReducer(chatReducer, {
+    entries: initialEntries ?? [],
+    streaming: undefined,
+  });
   const [activeView, setActiveView] = useState<ActiveView>("chat");
   const [heatEntries, setHeatEntries] = useState<HeatEntry[]>([]);
   const [treeRoots, setTreeRoots] = useState<TreeNode[]>([]);
@@ -111,7 +115,6 @@ export function App({ config, onPrompt, onReady }: AppProps): React.ReactElement
   const [budgetWarning, setBudgetWarning] = useState<string | null>(null);
 
   useInput((input, key) => {
-    // Ctrl+1/2/3/4 to switch panels
     if (key.ctrl && input === "1") setActiveView("chat");
     if (key.ctrl && input === "2") setActiveView("heatmap");
     if (key.ctrl && input === "3") setActiveView("tree");
